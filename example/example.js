@@ -20,11 +20,16 @@ root.render(
         const buttonText2 = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
 
         return (
-            fm.createElement('div', {id: 'element-A'}, [
-                fm.createElement('button', {id: buttonText2, onClick}, [
-                    fm.createText(buttonText2),
-                    fm.createElement('br', null, null),
-                    fm.createText('another line of text')
+            fm.createFragment([
+                fm.createElement('div', {id: 'element-A'}, [
+                    fm.createElement('button', {id: buttonText2, onClick}, [
+                        fm.createText(buttonText2),
+                        fm.createElement('br', null, null),
+                        fm.createText('another line of text')
+                    ])
+                ]),
+                fm.createElement('div', null, [
+                    fm.createText('Another Div Element.')
                 ])
             ])
         );
@@ -32,8 +37,15 @@ root.render(
 );
 
 setTimeout(function(){
-    root.render(fm.createElement('div', {id: 'element-B'}, [
-        fm.createText('New Div Element!')
-    ]));
+    root.render(
+        fm.createFragment([
+            fm.createElement('div', {id: 'element-B'}, [
+                fm.createText('New Div Element!')
+            ]),
+            fm.createElement('div', null, [
+                fm.createText('Another Div Element.')
+            ])
+        ])
+    );
 }, 3500);
 

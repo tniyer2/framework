@@ -269,6 +269,30 @@ exports.useAtom = function(valueArg, deps) {
     return atom;
 };
 
+exports.createFragment = function(children) {
+    const vDomNode = {
+        create: () => {
+            for (let i = 0; i < children.length; i++) {
+                children[i].create();
+            }
+        },
+        mount: (anchor) => {
+            for (let i = 0; i < children.length; i++) {
+                children[i].mount(anchor);
+            }
+        },
+        unmount: () => {
+            for (let i = 0; i < children.length; i++) {
+                children[i].unmount();
+            }
+        }
+    };
+
+    vDomNode.type = 'fragment';
+
+    return vDomNode;
+};
+
 exports.createRoot = function(anchor) {
     let _rootVDomNode = null;
 
