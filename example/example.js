@@ -9,13 +9,21 @@ const doSomething = (e) => {
 
 const root = fm.createRoot(document.getElementById('root'));
 root.render(
-    fm.createElement('div', {id: 'element-A'}, [
-        fm.createElement('button', {id: buttonText2, onClick: doSomething}, [
-            fm.createText(buttonText2),
-            fm.createElement('br', null, null),
-            fm.createText('another line of text')
-        ])
-    ])
+    fm.component(() => {
+        fm.onMount(() => {
+            console.log('My component is mounting.');
+        });
+
+        return (
+            fm.createElement('div', {id: 'element-A'}, [
+                fm.createElement('button', {id: buttonText2, onClick: doSomething}, [
+                    fm.createText(buttonText2),
+                    fm.createElement('br', null, null),
+                    fm.createText('another line of text')
+                ])
+            ])
+        );
+    })
 );
 
 setTimeout(function(){

@@ -1,6 +1,6 @@
 
 const fm = (function(){
-let exports = {};
+const exports = {};
 
 const noop = function(){};
 const isUdf = (a) => typeof a === 'undefined';
@@ -13,7 +13,7 @@ const removeItem = (a, item) => {
 
     const stop = a.length - 1;
     while (i < stop) {
-	    a[i] = a[++i];
+        a[i] = a[++i];
     }
     a.pop();
 };
@@ -114,7 +114,7 @@ exports.createElement = function(tagName, props, children) {
 
     const _disposeCallbacks = [];
 
-    let vDomNode = {
+    const vDomNode = {
         create: () => {
             _domElement = document.createElement(tagName);
 
@@ -180,7 +180,7 @@ exports.createText = function(textArg) {
 
     let _dispose = null;
 
-    let vDomNode = {
+    const vDomNode = {
         create: () => {
             if (textArg._type === 'atom') {
                 _domTextNode = document.createTextNode(textArg());
@@ -210,6 +210,39 @@ exports.createText = function(textArg) {
     vDomNode.type = 'text'
     
     return vDomNode;
+};
+
+let CURRENT_INITIALIZING_COMPONENT = null;
+
+exports.component = function(initFunc) {
+    const vDomNode = { _onMountHook: null };
+
+    CURRENT_INITIALIZING_COMPONENT = vDomNode;
+    const _childVDomNode = initFunc();
+    CURRENT_INITIALIZING_COMPONENT = null;
+
+    vDomNode.create = () => {
+        _childVDomNode.create();
+    };
+
+    vDomNode.mount = (anchor) => {
+        _childVDomNode.mount(anchor);
+
+        if (!isNull(vDomNode._onMountHook))
+            vDomNode._onMountHook();
+    };
+
+    vDomNode.unmount = () => {
+        _childVDomNode.unmount();
+    };
+
+    vDomNode.type = 'component';
+
+    return vDomNode;
+};
+
+exports.onMount = function(hook) {
+    CURRENT_INITIALIZING_COMPONENT._onMountHook = hook;
 };
 
 exports.createRoot = function(anchor) {
