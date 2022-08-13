@@ -99,7 +99,13 @@ exports.atom = function(valueArg, deps) {
         };
     }
 
-    ATOM_STACK.push([deps, atom]);
+    const _stackEntry = [deps, atom];
+
+    atom._remove = () => {
+        removeItem(ATOM_STACK, _stackEntry);
+    };
+
+    ATOM_STACK.push(_stackEntry);
 
     return atom;
 };
@@ -215,7 +221,7 @@ exports.createText = function(textArg) {
 let CURRENT_INITIALIZING_COMPONENT = null;
 
 exports.component = function(initFunc) {
-    const vDomNode = { _onMountHook: null };
+    const vDomNode = { _onMountHook: null, _onUnmountHook: null, _atoms: [] };
 
     CURRENT_INITIALIZING_COMPONENT = vDomNode;
     const _childVDomNode = initFunc();
@@ -233,6 +239,13 @@ exports.component = function(initFunc) {
     };
 
     vDomNode.unmount = () => {
+        if (!isNull(vDomNode._onUnmountHook))
+            vDomNode._onUnmountHook();
+
+        for (let i = 0; i < vDomNode._atoms.length; i++) {
+            vDomNode._atoms[i]._remove();
+        }
+
         _childVDomNode.unmount();
     };
 
@@ -241,9 +254,20 @@ exports.component = function(initFunc) {
     return vDomNode;
 };
 
-exports.onMount = function(hook) {
+exports.onMount = function(hook) { // gets called after mounting.
     CURRENT_INITIALIZING_COMPONENT._onMountHook = hook;
 };
+
+exports.onUnmount = function(hook) { // gets called before unmounting.
+    CURRENT_INITIALIZING_COMPONENT._onUnmountHook = hook;
+};
+
+exports.useAtom = function(valueArg, deps) {
+    const atom = exports.atom(valueArg, deps);
+    CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
+
+    return atom;
+}
 
 exports.createRoot = function(anchor) {
     let _rootVDomNode = null;
