@@ -136,7 +136,7 @@ exports.createElement = function(tagName, props, children) {
                     }
                     else if (startsWith_on(attrib)) { // if an event listener attribute.
                         const type = attrib.slice(2).toLowerCase();
-                        document.addEventListener(type, prop);
+                        _domElement.addEventListener(type, prop);
                     }
                     else { // if a static attribute.
                         _domElement.setAttribute(attrib, prop);
@@ -267,7 +267,7 @@ exports.useAtom = function(valueArg, deps) {
     CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
 
     return atom;
-}
+};
 
 exports.createRoot = function(anchor) {
     let _rootVDomNode = null;
