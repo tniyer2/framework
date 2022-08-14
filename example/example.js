@@ -1,40 +1,40 @@
 
 const buttonText = fm.atom('Hello World!');
 
-const root = fm.createRoot(document.getElementById('root'));
-root.render(
-    fm.component(() => {
-        fm.onMount(() => {
-            console.log('My component is mounting.');
-        });
+const MyComponent = fm.component(() => {
+    fm.onMount(() => {
+        console.log('My component is mounting.');
+    });
 
-        fm.onUnmount(() => {
-            console.log('My component is unmounting.');
-        });
+    fm.onUnmount(() => {
+        console.log('My component is unmounting.');
+    });
 
-        const onClick = (e) => {
-            console.log('Hello World!');
-            buttonText.update('button clicked');
-        };
+    const onClick = (e) => {
+        console.log('Hello World!');
+        buttonText.update('button clicked');
+    };
 
-        const buttonText2 = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
+    const buttonText2 = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
 
-        return (
-            fm.createFragment([
-                fm.createElement('div', {id: 'element-A'}, [
-                    fm.createElement('button', {id: buttonText2, onClick}, [
-                        fm.createText(buttonText2),
-                        fm.createElement('br', null, null),
-                        fm.createText('another line of text')
-                    ])
-                ]),
-                fm.createElement('div', null, [
-                    fm.createText('Another Div Element.')
+    return (
+        fm.createFragment([
+            fm.createElement('div', {id: 'element-A'}, [
+                fm.createElement('button', {id: buttonText, onClick}, [
+                    fm.createText(buttonText2),
+                    fm.createElement('br', null, null),
+                    fm.createText('another line of text')
                 ])
+            ]),
+            fm.createElement('div', null, [
+                fm.createText('Another Div Element.')
             ])
-        );
-    })
-);
+        ])
+    );
+});
+
+const root = fm.createRoot(document.getElementById('root'));
+root.render(MyComponent);
 
 setTimeout(function(){
     root.render(
@@ -47,5 +47,9 @@ setTimeout(function(){
             ])
         ])
     );
-}, 3500);
+}, 3000);
+
+setTimeout(function(){
+    root.render(MyComponent);
+}, 5000);
 

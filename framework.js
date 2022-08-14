@@ -101,11 +101,21 @@ exports.atom = function(valueArg, deps) {
 
     const _stackEntry = [deps, atom];
 
-    atom._remove = () => {
-        removeItem(ATOM_STACK, _stackEntry);
+    let active = false;
+
+    atom.activate = () => {
+        if (!active) {
+            ATOM_STACK.push(_stackEntry);
+            active = true;
+        }
     };
 
-    ATOM_STACK.push(_stackEntry);
+    atom.deactivate = () => {
+        removeItem(ATOM_STACK, _stackEntry);
+        active = false;
+    };
+
+    atom.activate();
 
     return atom;
 };
@@ -118,7 +128,7 @@ exports.createElement = function(tagName, props, children) {
 
     const _propKeys = isNull(props) ? null : Object.keys(props);
 
-    const _disposeCallbacks = [];
+    let _disposeCallbacks = [];
 
     const vDomNode = {
         create: () => {
@@ -130,9 +140,7 @@ exports.createElement = function(tagName, props, children) {
                     const prop = props[attrib];
 
                     if (prop._type === 'atom') { // if a dynamic attribute.
-                        _disposeCallbacks.push(prop.listen((newValue) => {
-                            _domElement.setAttribute(attrib, newValue);
-                        }));
+                        _domElement.setAttribute(attrib, prop);
                     }
                     else if (startsWith_on(attrib)) { // if an event listener attribute.
                         const type = attrib.slice(2).toLowerCase();
@@ -154,6 +162,19 @@ exports.createElement = function(tagName, props, children) {
             _anchor = anchor;
             _anchor.appendChild(_domElement);
 
+            if (!isNull(props)) {
+                for (let i = 0; i < _propKeys.length; i++) {
+                    const attrib = _propKeys[i];
+                    const prop = props[attrib];
+
+                    if (prop._type === 'atom') { // if a dynamic attribute.
+                        _disposeCallbacks.push(prop.listen((newValue) => {
+                            _domElement.setAttribute(attrib, newValue);
+                        }));
+                    }
+                }
+            }
+
             if (!isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].mount(_domElement);
@@ -161,17 +182,20 @@ exports.createElement = function(tagName, props, children) {
             }
         },
         unmount: () => {
+            _anchor.removeChild(_domElement);
+
             for (let i = 0; i < _disposeCallbacks.length; i++) {
                 _disposeCallbacks[i]();
             }
-
-            _anchor.removeChild(_domElement);
 
             if (!isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].unmount();
                 }
             }
+
+            _anchor = null;
+            _disposeCallbacks = [];
         }
     };
     
@@ -188,12 +212,8 @@ exports.createText = function(textArg) {
 
     const vDomNode = {
         create: () => {
-            if (textArg._type === 'atom') {
-                _domTextNode = document.createTextNode(textArg());
-            }
-            else {
-                _domTextNode = document.createTextNode(textArg);
-            }
+            const val = textArg._type === 'atom' ? textArg() : textArg;
+            _domTextNode = document.createTextNode(val);
         },
         mount: (anchor) => {
             _anchor = anchor;
@@ -207,13 +227,17 @@ exports.createText = function(textArg) {
             _anchor.appendChild(_domTextNode);
         },
         unmount: () => {
-            if (!isNull(_dispose)) _dispose();
+            if (!isNull(_dispose))
+                _dispose();
 
             _anchor.removeChild(_domTextNode);
+
+            _anchor = null;
+            _dispose = null;
         }
     };
 
-    vDomNode.type = 'text'
+    vDomNode.type = 'text';
     
     return vDomNode;
 };
@@ -232,6 +256,10 @@ exports.component = function(initFunc) {
     };
 
     vDomNode.mount = (anchor) => {
+        for (let i = 0; i < vDomNode._atoms.length; i++) {
+            vDomNode._atoms[i].activate();
+        }
+
         _childVDomNode.mount(anchor);
 
         if (!isNull(vDomNode._onMountHook))
@@ -239,14 +267,14 @@ exports.component = function(initFunc) {
     };
 
     vDomNode.unmount = () => {
-        if (!isNull(vDomNode._onUnmountHook))
-            vDomNode._onUnmountHook();
-
         for (let i = 0; i < vDomNode._atoms.length; i++) {
-            vDomNode._atoms[i]._remove();
+            vDomNode._atoms[i].deactivate();
         }
 
         _childVDomNode.unmount();
+
+        if (!isNull(vDomNode._onUnmountHook))
+            vDomNode._onUnmountHook();
     };
 
     vDomNode.type = 'component';
