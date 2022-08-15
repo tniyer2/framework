@@ -1,42 +1,68 @@
 
-const buttonText = fm.atom('Hello World!');
+const firstIfCondition = fm.atom(false);
+const secondIfCondition = fm.atom(false);
 
-const MyComponent = fm.component(() => {
+const MyComponent = () => {
     fm.onMount(() => {
-        console.log('My component is mounting.');
+        console.log('MyComponent is mounting.');
     });
 
     fm.onUnmount(() => {
-        console.log('My component is unmounting.');
+        console.log('MyComponent is unmounting.');
     });
+
+    const buttonText = fm.useAtom('Hello World!');
+    const derivedButtonText = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
 
     const onClick = (e) => {
         console.log('Hello World!');
-        buttonText.update('button clicked');
+        buttonText.update('Updated!');
+        firstIfCondition.update(!firstIfCondition());
     };
-
-    const buttonText2 = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
 
     return (
         fm.createFragment([
             fm.createElement('div', {id: 'element-A'}, [
                 fm.createElement('button', {id: buttonText, onClick}, [
-                    fm.createText(buttonText2),
+                    fm.createText(derivedButtonText),
                     fm.createElement('br', null, null),
                     fm.createText('another line of text')
                 ])
             ]),
             fm.createElement('div', null, [
                 fm.createText('Another Div Element.')
+            ]),
+            fm.createIf([firstIfCondition, secondIfCondition, true], [
+                fm.createElement('div', null, [
+                    fm.createText('First if condition is true.')
+                ]),
+                fm.createElement('div', null, [
+                    fm.createText('Second if condition is true.')
+                ]),
+                fm.createElement('div', null, [
+                    fm.createText('Else is true.')
+                ])
             ])
         ])
     );
-});
+};
+
+const rootVDomNode = fm.component(MyComponent);
 
 const root = fm.createRoot(document.getElementById('root'));
-root.render(MyComponent);
+root.render(rootVDomNode);
 
 setTimeout(function(){
+    const firstOnClick = () => {
+        console.log('Clicked Button 1.');
+        firstIfCondition.update(!firstIfCondition());
+    };
+
+    const secondOnClick = () => {
+        console.log('Clicked Button 2.');
+        secondIfCondition.update(!secondIfCondition());
+    };
+
     root.render(
         fm.createFragment([
             fm.createElement('div', {id: 'element-B'}, [
@@ -44,12 +70,18 @@ setTimeout(function(){
             ]),
             fm.createElement('div', null, [
                 fm.createText('Another Div Element.')
+            ]),
+            fm.createElement('button', {onClick: firstOnClick}, [
+                fm.createText('Toggle First If Condition.')
+            ]),
+            fm.createElement('button', {onClick: secondOnClick}, [
+                fm.createText('Toggle Second If Condition.')
             ])
         ])
     );
 }, 3000);
 
 setTimeout(function(){
-    root.render(MyComponent);
+    root.render(rootVDomNode);
 }, 5000);
 

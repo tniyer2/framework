@@ -158,8 +158,8 @@ exports.createElement = function(tagName, props, children) {
                 }
             }
         },
-        mount: (anchor) => {
-            _anchor = anchor;
+        mount: (ARG_anchor) => {
+            _anchor = ARG_anchor;
             _anchor.appendChild(_domElement);
 
             if (!isNull(props)) {
@@ -182,20 +182,19 @@ exports.createElement = function(tagName, props, children) {
             }
         },
         unmount: () => {
-            _anchor.removeChild(_domElement);
-
-            for (let i = 0; i < _disposeCallbacks.length; i++) {
-                _disposeCallbacks[i]();
-            }
-
             if (!isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].unmount();
                 }
             }
 
-            _anchor = null;
+            for (let i = 0; i < _disposeCallbacks.length; i++) {
+                _disposeCallbacks[i]();
+            }
             _disposeCallbacks = [];
+
+            _anchor.removeChild(_domElement);
+            _anchor = null;
         }
     };
     
@@ -215,8 +214,8 @@ exports.createText = function(textArg) {
             const val = textArg._type === 'atom' ? textArg() : textArg;
             _domTextNode = document.createTextNode(val);
         },
-        mount: (anchor) => {
-            _anchor = anchor;
+        mount: (ARG_anchor) => {
+            _anchor = ARG_anchor;
 
             if (textArg._type === 'atom') {
                 _dispose = textArg.listen((newValue) => {
@@ -227,13 +226,13 @@ exports.createText = function(textArg) {
             _anchor.appendChild(_domTextNode);
         },
         unmount: () => {
-            if (!isNull(_dispose))
-                _dispose();
-
             _anchor.removeChild(_domTextNode);
-
             _anchor = null;
-            _dispose = null;
+
+            if (!isNull(_dispose)) {
+                _dispose();
+                _dispose = null;
+            }
         }
     };
 
@@ -267,14 +266,14 @@ exports.component = function(initFunc) {
     };
 
     vDomNode.unmount = () => {
-        for (let i = 0; i < vDomNode._atoms.length; i++) {
-            vDomNode._atoms[i].deactivate();
-        }
+        if (!isNull(vDomNode._onUnmountHook))
+            vDomNode._onUnmountHook();
 
         _childVDomNode.unmount();
 
-        if (!isNull(vDomNode._onUnmountHook))
-            vDomNode._onUnmountHook();
+        for (let i = 0; i < vDomNode._atoms.length; i++) {
+            vDomNode._atoms[i].deactivate();
+        }
     };
 
     vDomNode.type = 'component';
@@ -317,6 +316,81 @@ exports.createFragment = function(children) {
     };
 
     vDomNode.type = 'fragment';
+
+    return vDomNode;
+};
+
+exports.createIf = function(conditions, children) {
+    if (conditions.length <= 0 || conditions.length !== children.length) return null;
+
+    let _anchor;
+
+    let _cachedConditions;
+    let _activeConditionIndex;
+    let _isCreated = Array(conditions.length).fill(false);
+
+    let _disposeCallbacks = [];
+
+    const _activateIndex = () => {
+        if (_activeConditionIndex !== -1) {
+            if (!_isCreated[_activeConditionIndex]) {
+                children[_activeConditionIndex].create();
+                _isCreated[_activeConditionIndex] = true;
+            }
+
+            children[_activeConditionIndex].mount(_anchor);
+        }
+    };
+
+    const vDomNode = {
+        create: noop,
+        mount: (ARG_anchor) => {
+            _anchor = ARG_anchor;
+
+            for (let i = 0; i < conditions.length; i++) {
+                const condition = conditions[i];
+                if (condition._type !== 'atom') continue;
+
+                _disposeCallbacks.push(condition.listen((newValue) => {
+                    _cachedConditions[i] = newValue;
+                    newActiveConditionIndex = _cachedConditions.indexOf(true);
+
+                    if (_activeConditionIndex !== newActiveConditionIndex) {
+                        if (_activeConditionIndex !== -1) {
+                            children[_activeConditionIndex].unmount();
+                        }
+
+                        _activeConditionIndex = newActiveConditionIndex;
+                        _activateIndex();
+                    }
+                }));
+            }
+
+            _cachedConditions = Array(conditions.length);
+            for (let i = 0; i < conditions.length; i++) {
+                const c = conditions[i];
+                _cachedConditions[i] = c._type === 'atom' ? c() : c;
+            }
+            _activeConditionIndex = _cachedConditions.indexOf(true);
+            _activateIndex();
+        },
+        unmount: () => {
+            if (_activeConditionIndex !== -1) {
+                children[_activeConditionIndex].unmount();
+            }
+            _cachedConditions = null;
+            _activeConditionIndex = -1;
+
+            for (let i = 0; i < _disposeCallbacks.length; i++) {
+                _disposeCallbacks[i]();
+            }
+            _disposeCallbacks = [];
+
+            _anchor = null;
+        }
+    };
+
+    vDomNode.type = 'if'
 
     return vDomNode;
 };
