@@ -1,6 +1,6 @@
 
-const firstIfCondition = fm.atom(false);
-const secondIfCondition = fm.atom(false);
+const firstIfCondition = fm.createAtom(false);
+const secondIfCondition = fm.createAtom(false);
 
 const MyComponent = () => {
     fm.onMount(() => {
@@ -47,7 +47,7 @@ const MyComponent = () => {
     );
 };
 
-const rootVDomNode = fm.component(MyComponent);
+const rootVDomNode = fm.createComponent(MyComponent);
 
 const root = fm.createRoot(document.getElementById('root'));
 root.render(rootVDomNode);

@@ -1,39 +1,41 @@
 
 const fm = (function(){
-const exports = {};
+const util = {
+    noop: function(){},
+    isUdf: (a) => typeof a === 'undefined',
+    isNull: (a) => a === null,
+    isFunction: (a) => typeof a === 'function',
+    removeItem: (a, item) => {
+        let i = a.indexOf(item);
+        if (i < 0 || i >= a.length) return;
 
-const noop = function(){};
-const isUdf = (a) => typeof a === 'undefined';
-const isNull = (a) => a === null;
-const isFunction = (a) => typeof a === 'function';
-
-const removeItem = (a, item) => {
-    let i = a.indexOf(item);
-    if (i < 0 || i >= a.length) return;
-
-    const stop = a.length - 1;
-    while (i < stop) {
-        a[i] = a[++i];
+        const stop = a.length - 1;
+        while (i < stop) {
+            a[i] = a[++i];
+        }
+        a.pop();
     }
-    a.pop();
 };
 
 let ATOM_UPDATE_SCHEDULED = false;
 const ATOM_STACK = [];
 
-const updateAtoms = () => {
+const UPDATE_ATOMS = () => {
     for (let i = 0; i < ATOM_STACK.length; i++) {
         const deps = ATOM_STACK[i][0];
         const atom = ATOM_STACK[i][1];
 
-        if (isNull(deps)) { // if a source atom.
+        if (util.isNull(deps)) { // if a source atom.
             if (atom._dirty) {
                 atom._update();
             }
         }
         else { // if a derived atom.
-            if (deps.some((a) => a._dirty)) {
-                atom._update();
+            for (let i = 0; i < deps.length; i++) {
+                if (deps[i]._dirty) {
+                    atom._update();
+                    break;
+                }
             }
         }
     }
@@ -44,17 +46,20 @@ const updateAtoms = () => {
     }
 };
 
-const scheduleAtomUpdate = () => {
+const SCHEDULE_ATOM_UPDATE = () => {
     if (ATOM_UPDATE_SCHEDULED) return;
     ATOM_UPDATE_SCHEDULED = true;
 
     setTimeout(() => {
-        ATOM_UPDATE_SCHEDULED = false; // this should be before so that side effect schedule another update.
-        updateAtoms();
+        ATOM_UPDATE_SCHEDULED = false; // this should be before update so that a
+                                       // side effect during update schedules another update.
+        UPDATE_ATOMS();
     });
 };
 
-exports.atom = function(valueArg, deps) {
+const exports = {};
+
+exports.createAtom = function(ARG_value, deps) {
     let _value;
 
     const _callbacks = [];
@@ -70,30 +75,38 @@ exports.atom = function(valueArg, deps) {
     atom.listen = (newCallback) => {
         _callbacks.push(newCallback);
         return () => {
-            removeItem(_callbacks, newCallback);
+            util.removeItem(_callbacks, newCallback);
         };
     };
 
-    if (isUdf(deps)) deps = null;
-    if (isNull(deps)) { // if a source atom.
-        _value = valueArg;
+    if (util.isUdf(deps)) deps = null;
+    if (util.isNull(deps)) { // if a source atom.
+        _value = ARG_value;
 
         atom.update = (newValue) => {
             _value = newValue;
             atom._dirty = true;
-            scheduleAtomUpdate();
+            SCHEDULE_ATOM_UPDATE();
         };
 
         atom._update = _callCallbacks; // gets called during next update.
     }
     else { // if a derived atom.
         // deps should be a non-empty array and
-        // valueArg should be a function.
+        // ARG_value should be a function.
 
-        _value = valueArg(...(deps.map((a) => a())));
+        const _updateDerivedValues = () => {
+            const values = [];
+            for (let i = 0; i < deps.length; i++) {
+                values.push(deps[i]());
+            }
+            _value = ARG_value(...values);
+        };
+
+        _updateDerivedValues();
 
         atom._update = () => {
-            _value = valueArg(...(deps.map((a) => a())));
+            _updateDerivedValues();
             atom._dirty = true;
             _callCallbacks(); // gets called immediately.
         };
@@ -111,7 +124,7 @@ exports.atom = function(valueArg, deps) {
     };
 
     atom.deactivate = () => {
-        removeItem(ATOM_STACK, _stackEntry);
+        util.removeItem(ATOM_STACK, _stackEntry);
         active = false;
     };
 
@@ -126,7 +139,7 @@ exports.createElement = function(tagName, props, children) {
     let _domElement;
     let _anchor;
 
-    const _propKeys = isNull(props) ? null : Object.keys(props);
+    const _propKeys = util.isNull(props) ? null : Object.keys(props);
 
     let _disposeCallbacks = [];
 
@@ -134,7 +147,7 @@ exports.createElement = function(tagName, props, children) {
         create: () => {
             _domElement = document.createElement(tagName);
 
-            if (!isNull(props)) {
+            if (!util.isNull(props)) {
                 for (let i = 0; i < _propKeys.length; i++) {
                     const attrib = _propKeys[i];
                     const prop = props[attrib];
@@ -152,7 +165,7 @@ exports.createElement = function(tagName, props, children) {
                 }
             }
 
-            if (!isNull(children)) {
+            if (!util.isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].create();
                 }
@@ -162,7 +175,7 @@ exports.createElement = function(tagName, props, children) {
             _anchor = ARG_anchor;
             _anchor.appendChild(_domElement);
 
-            if (!isNull(props)) {
+            if (!util.isNull(props)) {
                 for (let i = 0; i < _propKeys.length; i++) {
                     const attrib = _propKeys[i];
                     const prop = props[attrib];
@@ -175,14 +188,14 @@ exports.createElement = function(tagName, props, children) {
                 }
             }
 
-            if (!isNull(children)) {
+            if (!util.isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].mount(_domElement);
                 }
             }
         },
         unmount: () => {
-            if (!isNull(children)) {
+            if (!util.isNull(children)) {
                 for (let i = 0; i < children.length; i++) {
                     children[i].unmount();
                 }
@@ -203,7 +216,7 @@ exports.createElement = function(tagName, props, children) {
     return vDomNode;
 };
 
-exports.createText = function(textArg) {
+exports.createText = function(ARG_text) {
     let _domTextNode;
     let _anchor;
 
@@ -211,14 +224,14 @@ exports.createText = function(textArg) {
 
     const vDomNode = {
         create: () => {
-            const val = textArg._type === 'atom' ? textArg() : textArg;
-            _domTextNode = document.createTextNode(val);
+            const value = ARG_text._type === 'atom' ? ARG_text() : ARG_text;
+            _domTextNode = document.createTextNode(value);
         },
         mount: (ARG_anchor) => {
             _anchor = ARG_anchor;
 
-            if (textArg._type === 'atom') {
-                _dispose = textArg.listen((newValue) => {
+            if (ARG_text._type === 'atom') {
+                _dispose = ARG_text.listen((newValue) => {
                     _domTextNode.nodeValue = newValue;
                 });
             }
@@ -229,7 +242,7 @@ exports.createText = function(textArg) {
             _anchor.removeChild(_domTextNode);
             _anchor = null;
 
-            if (!isNull(_dispose)) {
+            if (!util.isNull(_dispose)) {
                 _dispose();
                 _dispose = null;
             }
@@ -243,7 +256,7 @@ exports.createText = function(textArg) {
 
 let CURRENT_INITIALIZING_COMPONENT = null;
 
-exports.component = function(initFunc) {
+exports.createComponent = function(initFunc) {
     const vDomNode = { _onMountHook: null, _onUnmountHook: null, _atoms: [] };
 
     CURRENT_INITIALIZING_COMPONENT = vDomNode;
@@ -261,12 +274,12 @@ exports.component = function(initFunc) {
 
         _childVDomNode.mount(anchor);
 
-        if (!isNull(vDomNode._onMountHook))
+        if (!util.isNull(vDomNode._onMountHook))
             vDomNode._onMountHook();
     };
 
     vDomNode.unmount = () => {
-        if (!isNull(vDomNode._onUnmountHook))
+        if (!util.isNull(vDomNode._onUnmountHook))
             vDomNode._onUnmountHook();
 
         _childVDomNode.unmount();
@@ -289,10 +302,9 @@ exports.onUnmount = function(hook) { // gets called before unmounting.
     CURRENT_INITIALIZING_COMPONENT._onUnmountHook = hook;
 };
 
-exports.useAtom = function(valueArg, deps) {
-    const atom = exports.atom(valueArg, deps);
+exports.useAtom = function(ARG_value, deps) {
+    const atom = exports.createAtom(ARG_value, deps);
     CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
-
     return atom;
 };
 
@@ -343,7 +355,7 @@ exports.createIf = function(conditions, children) {
     };
 
     const vDomNode = {
-        create: noop,
+        create: util.noop,
         mount: (ARG_anchor) => {
             _anchor = ARG_anchor;
 
@@ -400,12 +412,12 @@ exports.createRoot = function(anchor) {
 
     return {
         render: (target) => {
-            if (!isNull(_rootVDomNode)) {
+            if (!util.isNull(_rootVDomNode)) {
                 _rootVDomNode.unmount();
             }
             _rootVDomNode = target;
 
-            if (!isNull(_rootVDomNode)) {
+            if (!util.isNull(_rootVDomNode)) {
                 _rootVDomNode.create();
                 _rootVDomNode.mount(anchor);
             }
