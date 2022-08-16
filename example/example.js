@@ -32,7 +32,7 @@ const MyComponent = () => {
             fm.createElement('div', null, [
                 fm.createText('Another Div Element.')
             ]),
-            fm.createIf([firstIfCondition, secondIfCondition, true], [
+            fm.createIf([firstIfCondition, secondIfCondition, fm.createAtom(true)], [
                 fm.createElement('div', null, [
                     fm.createText('First if condition is true.')
                 ]),

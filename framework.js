@@ -1,7 +1,8 @@
 
 const fm = (function(){
 const util = {
-    noop: function(){},
+    noop: () => {},
+    pass: (a) => a,
     isUdf: (a) => typeof a === 'undefined',
     isNull: (a) => a === null,
     isFunction: (a) => typeof a === 'function',
@@ -26,13 +27,13 @@ const UPDATE_ATOMS = () => {
         const atom = ATOM_STACK[i][1];
 
         if (util.isNull(deps)) { // if a source atom.
-            if (atom._dirty) {
+            if (atom._dirty === true) {
                 atom._update();
             }
         }
         else { // if a derived atom.
             for (let i = 0; i < deps.length; i++) {
-                if (deps[i]._dirty) {
+                if (deps[i]._dirty === true) {
                     atom._update();
                     break;
                 }
@@ -59,7 +60,9 @@ const SCHEDULE_ATOM_UPDATE = () => {
 
 const exports = {};
 
-exports.createAtom = function(ARG_value, deps) {
+exports.createAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
+    if (util.isUdf(deps)) deps = null;
+
     let _value;
 
     const _callbacks = [];
@@ -72,6 +75,7 @@ exports.createAtom = function(ARG_value, deps) {
     const atom = () => _value;
     atom._type = 'atom';
     atom._dirty = false;
+
     atom.listen = (newCallback) => {
         _callbacks.push(newCallback);
         return () => {
@@ -79,7 +83,6 @@ exports.createAtom = function(ARG_value, deps) {
         };
     };
 
-    if (util.isUdf(deps)) deps = null;
     if (util.isNull(deps)) { // if a source atom.
         _value = ARG_value;
 
@@ -100,7 +103,9 @@ exports.createAtom = function(ARG_value, deps) {
             for (let i = 0; i < deps.length; i++) {
                 values.push(deps[i]());
             }
-            _value = ARG_value(...values);
+
+            _value = passCallbackArgsAsArray === true ?
+                ARG_value(values) : ARG_value(...values);
         };
 
         _updateDerivedValues();
@@ -116,19 +121,21 @@ exports.createAtom = function(ARG_value, deps) {
 
     let active = false;
 
-    atom.activate = () => {
+    atom._activate = () => {
         if (!active) {
             ATOM_STACK.push(_stackEntry);
             active = true;
         }
     };
 
-    atom.deactivate = () => {
-        util.removeItem(ATOM_STACK, _stackEntry);
-        active = false;
+    atom._deactivate = () => {
+        if (active) {
+            util.removeItem(ATOM_STACK, _stackEntry);
+            active = false;
+        }
     };
 
-    atom.activate();
+    atom._activate();
 
     return atom;
 };
@@ -143,7 +150,7 @@ exports.createElement = function(tagName, props, children) {
     //     can both be false,
     //     can both be true,
     //     _mounted false but _mountedDOM true, (for efficiency to not unmount DOM)
-    //      but never _mounted true but _mountedDOM false.
+    //     but never _mounted true but _mountedDOM false.
     let _mounted = false;
     let _mountedDOM = false;
 
@@ -307,10 +314,6 @@ exports.createComponent = function(initFunc) {
     };
 
     vDomNode.mount = (anchor) => {
-        for (let i = 0; i < vDomNode._atoms.length; i++) {
-            vDomNode._atoms[i].activate();
-        }
-
         _childVDomNode.mount(anchor);
 
         if (!util.isNull(vDomNode._onMountHook))
@@ -322,10 +325,6 @@ exports.createComponent = function(initFunc) {
             vDomNode._onUnmountHook();
 
         _childVDomNode.unmount(unmountDOMFlag);
-
-        for (let i = 0; i < vDomNode._atoms.length; i++) {
-            vDomNode._atoms[i].deactivate();
-        }
     };
 
     vDomNode.type = 'component';
@@ -341,8 +340,8 @@ exports.onUnmount = function(hook) { // gets called before unmounting.
     CURRENT_INITIALIZING_COMPONENT._onUnmountHook = hook;
 };
 
-exports.useAtom = function(ARG_value, deps) {
-    const atom = exports.createAtom(ARG_value, deps);
+exports.useAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
+    const atom = exports.createAtom(ARG_value, deps, passCallbackArgsAsArray);
     CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
     return atom;
 };
@@ -371,26 +370,22 @@ exports.createFragment = function(children) {
     return vDomNode;
 };
 
-exports.createIf = function(conditions, children) {
-    if (conditions.length <= 0 || conditions.length !== children.length) return null;
-
+exports.createIf = function(ARG_conditions, children) {
     let _anchor;
 
-    let _cachedConditions;
     let _activeConditionIndex = -1;
-    let _isCreated = Array(conditions.length).fill(false);
+    let _isCreated = Array(ARG_conditions.length).fill(false);
 
-    let _disposeCallbacks = [];
+    let _atom = exports.createAtom(util.pass, ARG_conditions, true);
+    let _dispose;
 
-    const _activateCondition = (newIndex, newAnchor, remountFlag) => {
+    const _activateCondition = (newIndex, remountFlag) => {
         const prevIndex = _activeConditionIndex;
         const indexChanged = prevIndex !== newIndex;
 
         if (prevIndex !== -1 && indexChanged) {
             children[prevIndex].unmount(true); // physically unmount
         }
-
-        _anchor = newAnchor;
 
         if (newIndex !== -1 && (indexChanged || remountFlag)) {
             if (!_isCreated[newIndex]) {
@@ -402,38 +397,27 @@ exports.createIf = function(conditions, children) {
 
         _activeConditionIndex = newIndex;
     };
-
+ 
     const vDomNode = {
         create: util.noop,
         mount: (ARG_anchor) => {
-            for (let i = 0; i < conditions.length; i++) {
-                const c = conditions[i];
+            _anchor = ARG_anchor;
 
-                if (c._type === 'atom') {
-                    _disposeCallbacks.push(c.listen((newValue) => {
-                        _cachedConditions[i] = newValue;
-                        _activateCondition(_cachedConditions.indexOf(true), _anchor, false);
-                    }));
-                }
-            }
+            _dispose = _atom.listen((conditions) => {
+                _activateCondition(conditions.indexOf(true), false);
+            });
 
-            _cachedConditions = Array(conditions.length);
-            for (let i = 0; i < conditions.length; i++) {
-                const c = conditions[i];
-                _cachedConditions[i] = c._type === 'atom' ? c() : c;
-            }
-            _activateCondition(_cachedConditions.indexOf(true), ARG_anchor, true);
+            _activateCondition(_atom().indexOf(true), true);
         },
         unmount: (unmountDOMFlag) => {
             if (_activeConditionIndex !== -1) {
                 children[_activeConditionIndex].unmount(unmountDOMFlag);
             }
-            _cachedConditions = null;
 
-            for (let i = 0; i < _disposeCallbacks.length; i++) {
-                _disposeCallbacks[i]();
-            }
-            _disposeCallbacks = [];
+            _dispose();
+            _dispose = null;
+
+            _anchor = null;
         }
     };
 
