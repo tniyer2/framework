@@ -139,6 +139,14 @@ exports.createElement = function(tagName, props, children) {
     let _domElement;
     let _anchor;
 
+    // _mounted and _mountedDOM
+    //     can both be false,
+    //     can both be true,
+    //     _mounted false but _mountedDOM true, (for efficiency to not unmount DOM)
+    //      but never _mounted true but _mountedDOM false.
+    let _mounted = false;
+    let _mountedDOM = false;
+
     const _propKeys = util.isNull(props) ? null : Object.keys(props);
 
     let _disposeCallbacks = [];
@@ -153,7 +161,7 @@ exports.createElement = function(tagName, props, children) {
                     const prop = props[attrib];
 
                     if (prop._type === 'atom') { // if a dynamic attribute.
-                        _domElement.setAttribute(attrib, prop);
+                        _domElement.setAttribute(attrib, prop());
                     }
                     else if (startsWith_on(attrib)) { // if an event listener attribute.
                         const type = attrib.slice(2).toLowerCase();
@@ -172,42 +180,57 @@ exports.createElement = function(tagName, props, children) {
             }
         },
         mount: (ARG_anchor) => {
-            _anchor = ARG_anchor;
-            _anchor.appendChild(_domElement);
+            const anchorChanged = !ARG_anchor.isEqualNode(_anchor);
+            // console.log('anchorChanged:', anchorChanged, _anchor, ARG_anchor);
+            if (!_mountedDOM || anchorChanged) {
+                _anchor = ARG_anchor;
+                _anchor.appendChild(_domElement);
+                _mountedDOM = true;
+            }
 
-            if (!util.isNull(props)) {
-                for (let i = 0; i < _propKeys.length; i++) {
-                    const attrib = _propKeys[i];
-                    const prop = props[attrib];
+            if (!_mounted) {
+                if (!util.isNull(props)) {
+                    for (let i = 0; i < _propKeys.length; i++) {
+                        const attrib = _propKeys[i];
+                        const prop = props[attrib];
 
-                    if (prop._type === 'atom') { // if a dynamic attribute.
-                        _disposeCallbacks.push(prop.listen((newValue) => {
-                            _domElement.setAttribute(attrib, newValue);
-                        }));
+                        if (prop._type === 'atom') { // if a dynamic attribute.
+                            _disposeCallbacks.push(prop.listen((newValue) => {
+                                _domElement.setAttribute(attrib, newValue);
+                            }));
+                        }
                     }
                 }
-            }
 
-            if (!util.isNull(children)) {
-                for (let i = 0; i < children.length; i++) {
-                    children[i].mount(_domElement);
+                if (!util.isNull(children)) {
+                    for (let i = 0; i < children.length; i++) {
+                        children[i].mount(_domElement);
+                    }
                 }
+
+                _mounted = true;
             }
         },
-        unmount: () => {
-            if (!util.isNull(children)) {
-                for (let i = 0; i < children.length; i++) {
-                    children[i].unmount();
+        unmount: (unmountDOMFlag) => {
+            if (_mounted) {
+                if (!util.isNull(children)) {
+                    for (let i = 0; i < children.length; i++) {
+                        children[i].unmount();
+                    }
                 }
+
+                for (let i = 0; i < _disposeCallbacks.length; i++) {
+                    _disposeCallbacks[i]();
+                }
+                _disposeCallbacks = [];
+
+                _mounted = false;
             }
 
-            for (let i = 0; i < _disposeCallbacks.length; i++) {
-                _disposeCallbacks[i]();
+            if (_mountedDOM && unmountDOMFlag) {
+                _anchor.removeChild(_domElement);
+                _mountedDOM = false;
             }
-            _disposeCallbacks = [];
-
-            _anchor.removeChild(_domElement);
-            _anchor = null;
         }
     };
     
@@ -220,6 +243,10 @@ exports.createText = function(ARG_text) {
     let _domTextNode;
     let _anchor;
 
+    // _mounted and _mountedDOM behave same as in createElement().
+    let _mounted = false;
+    let _mountedDOM = false;
+
     let _dispose = null;
 
     const vDomNode = {
@@ -228,23 +255,35 @@ exports.createText = function(ARG_text) {
             _domTextNode = document.createTextNode(value);
         },
         mount: (ARG_anchor) => {
-            _anchor = ARG_anchor;
-
-            if (ARG_text._type === 'atom') {
-                _dispose = ARG_text.listen((newValue) => {
-                    _domTextNode.nodeValue = newValue;
-                });
+            if (!_mounted) {
+                if (ARG_text._type === 'atom') {
+                    _dispose = ARG_text.listen((newValue) => {
+                        _domTextNode.nodeValue = newValue;
+                    });
+                }
+                _mounted = true;
             }
 
-            _anchor.appendChild(_domTextNode);
+            const anchorChanged = !ARG_anchor.isEqualNode(_anchor);
+            // console.log('anchorChanged:', anchorChanged, _anchor, ARG_anchor);
+            if (!_mountedDOM || anchorChanged) {
+                _anchor = ARG_anchor;
+                _anchor.appendChild(_domTextNode);
+                _mountedDOM = true;
+            }
         },
-        unmount: () => {
-            _anchor.removeChild(_domTextNode);
-            _anchor = null;
+        unmount: (unmountDOMFlag) => {
+            if (_mountedDOM && unmountDOMFlag) {
+                _anchor.removeChild(_domTextNode);
+                _mountedDOM = false;
+            }
 
-            if (!util.isNull(_dispose)) {
-                _dispose();
-                _dispose = null;
+            if (_mounted) {
+                if (!util.isNull(_dispose)) {
+                    _dispose();
+                    _dispose = null;
+                }
+                _mounted = false;
             }
         }
     };
@@ -278,11 +317,11 @@ exports.createComponent = function(initFunc) {
             vDomNode._onMountHook();
     };
 
-    vDomNode.unmount = () => {
+    vDomNode.unmount = (unmountDOMFlag) => {
         if (!util.isNull(vDomNode._onUnmountHook))
             vDomNode._onUnmountHook();
 
-        _childVDomNode.unmount();
+        _childVDomNode.unmount(unmountDOMFlag);
 
         for (let i = 0; i < vDomNode._atoms.length; i++) {
             vDomNode._atoms[i].deactivate();
@@ -320,9 +359,9 @@ exports.createFragment = function(children) {
                 children[i].mount(anchor);
             }
         },
-        unmount: () => {
+        unmount: (unmountDOMFlag) => {
             for (let i = 0; i < children.length; i++) {
-                children[i].unmount();
+                children[i].unmount(unmountDOMFlag);
             }
         }
     };
@@ -338,44 +377,44 @@ exports.createIf = function(conditions, children) {
     let _anchor;
 
     let _cachedConditions;
-    let _activeConditionIndex;
+    let _activeConditionIndex = -1;
     let _isCreated = Array(conditions.length).fill(false);
 
     let _disposeCallbacks = [];
 
-    const _activateIndex = () => {
-        if (_activeConditionIndex !== -1) {
-            if (!_isCreated[_activeConditionIndex]) {
-                children[_activeConditionIndex].create();
-                _isCreated[_activeConditionIndex] = true;
-            }
+    const _activateCondition = (newIndex, newAnchor, remountFlag) => {
+        const prevIndex = _activeConditionIndex;
+        const indexChanged = prevIndex !== newIndex;
 
-            children[_activeConditionIndex].mount(_anchor);
+        if (prevIndex !== -1 && indexChanged) {
+            children[prevIndex].unmount(true); // physically unmount
         }
+
+        _anchor = newAnchor;
+
+        if (newIndex !== -1 && (indexChanged || remountFlag)) {
+            if (!_isCreated[newIndex]) {
+                children[newIndex].create();
+                _isCreated[newIndex] = true;
+            }
+            children[newIndex].mount(_anchor);
+        }
+
+        _activeConditionIndex = newIndex;
     };
 
     const vDomNode = {
         create: util.noop,
         mount: (ARG_anchor) => {
-            _anchor = ARG_anchor;
-
             for (let i = 0; i < conditions.length; i++) {
-                const condition = conditions[i];
-                if (condition._type !== 'atom') continue;
+                const c = conditions[i];
 
-                _disposeCallbacks.push(condition.listen((newValue) => {
-                    _cachedConditions[i] = newValue;
-                    newActiveConditionIndex = _cachedConditions.indexOf(true);
-
-                    if (_activeConditionIndex !== newActiveConditionIndex) {
-                        if (_activeConditionIndex !== -1) {
-                            children[_activeConditionIndex].unmount();
-                        }
-
-                        _activeConditionIndex = newActiveConditionIndex;
-                        _activateIndex();
-                    }
-                }));
+                if (c._type === 'atom') {
+                    _disposeCallbacks.push(c.listen((newValue) => {
+                        _cachedConditions[i] = newValue;
+                        _activateCondition(_cachedConditions.indexOf(true), _anchor, false);
+                    }));
+                }
             }
 
             _cachedConditions = Array(conditions.length);
@@ -383,22 +422,18 @@ exports.createIf = function(conditions, children) {
                 const c = conditions[i];
                 _cachedConditions[i] = c._type === 'atom' ? c() : c;
             }
-            _activeConditionIndex = _cachedConditions.indexOf(true);
-            _activateIndex();
+            _activateCondition(_cachedConditions.indexOf(true), ARG_anchor, true);
         },
-        unmount: () => {
+        unmount: (unmountDOMFlag) => {
             if (_activeConditionIndex !== -1) {
-                children[_activeConditionIndex].unmount();
+                children[_activeConditionIndex].unmount(unmountDOMFlag);
             }
             _cachedConditions = null;
-            _activeConditionIndex = -1;
 
             for (let i = 0; i < _disposeCallbacks.length; i++) {
                 _disposeCallbacks[i]();
             }
             _disposeCallbacks = [];
-
-            _anchor = null;
         }
     };
 
@@ -413,7 +448,7 @@ exports.createRoot = function(anchor) {
     return {
         render: (target) => {
             if (!util.isNull(_rootVDomNode)) {
-                _rootVDomNode.unmount();
+                _rootVDomNode.unmount(true);
             }
             _rootVDomNode = target;
 

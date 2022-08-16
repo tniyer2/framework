@@ -23,7 +23,7 @@ const MyComponent = () => {
     return (
         fm.createFragment([
             fm.createElement('div', {id: 'element-A'}, [
-                fm.createElement('button', {id: buttonText, onClick}, [
+                fm.createElement('button', {id: buttonText, onClick: onClick}, [
                     fm.createText(derivedButtonText),
                     fm.createElement('br', null, null),
                     fm.createText('another line of text')
@@ -69,7 +69,7 @@ setTimeout(function(){
                 fm.createText('New Div Element!')
             ]),
             fm.createElement('div', null, [
-                fm.createText('Another Div Element.')
+                fm.createText('Second Div Element.')
             ]),
             fm.createElement('button', {onClick: firstOnClick}, [
                 fm.createText('Toggle First If Condition.')
@@ -82,6 +82,8 @@ setTimeout(function(){
 }, 3000);
 
 setTimeout(function(){
-    root.render(rootVDomNode);
+    root.render(fm.createElement('div', {id: 'new-parent-element'}, [
+        rootVDomNode
+    ]));
 }, 5000);
 
