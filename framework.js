@@ -5,7 +5,6 @@ const util = {
     pass: (a) => a,
     isUdf: (a) => typeof a === 'undefined',
     isNull: (a) => a === null,
-    isFunction: (a) => typeof a === 'function',
     removeItem: (a, item) => {
         let i = a.indexOf(item);
         if (i < 0 || i >= a.length) return;
@@ -60,32 +59,27 @@ const SCHEDULE_ATOM_UPDATE = () => {
 
 const exports = {};
 
+/*
+deps must be undefined, null, or an Array.
+if passCallbackArgsAsArray === true, dep values will be passed to derivation function in an array.
+*/
 exports.createAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
     if (util.isUdf(deps)) deps = null;
 
-    let _value;
+    let atom;
 
+    let _value;
     const _callbacks = [];
     const _callCallbacks = () => {
-        for (let i = 0; i < _callbacks.length; i++) {
+        for (let i = 0; i < _callbacks.length; i++)
             _callbacks[i](_value);
-        }
-    };
-
-    const atom = () => _value;
-    atom._type = 'atom';
-    atom._dirty = false;
-
-    atom.listen = (newCallback) => {
-        _callbacks.push(newCallback);
-        return () => {
-            util.removeItem(_callbacks, newCallback);
-        };
     };
 
     if (util.isNull(deps)) { // if a source atom.
         _value = ARG_value;
+        atom = () => _value;
 
+        // atom.update is only defined on source atoms.
         atom.update = (newValue) => {
             _value = newValue;
             atom._dirty = true;
@@ -95,31 +89,45 @@ exports.createAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
         atom._update = _callCallbacks; // gets called during next update.
     }
     else { // if a derived atom.
-        // deps should be a non-empty array and
-        // ARG_value should be a function.
+        // assert(deps === non-empty array)
+        // assert(ARG_value === function)
 
-        const _updateDerivedValues = () => {
-            const values = [];
-            for (let i = 0; i < deps.length; i++) {
-                values.push(deps[i]());
-            }
+        const _updateDerivedValue = () => {
+            const depVals = [];
+            for (let i = 0; i < deps.length; i++)
+                depVals.push(deps[i]());
 
             _value = passCallbackArgsAsArray === true ?
-                ARG_value(values) : ARG_value(...values);
+                ARG_value(depVals) : ARG_value(...depVals);
         };
 
-        _updateDerivedValues();
+        _updateDerivedValue();
 
-        atom._update = () => {
-            _updateDerivedValues();
+        const _update = () => {
+            _updateDerivedValue();
             atom._dirty = true;
-            _callCallbacks(); // gets called immediately.
+            _callCallbacks();
         };
+
+        atom = () => {
+            _update();
+            return _value;
+        };
+
+        atom._update = _update;
     }
 
-    const _stackEntry = [deps, atom];
+    atom._type = 'atom';
+    atom._dirty = false;
+    atom.listen = (newCallback) => {
+        _callbacks.push(newCallback);
+        return () => {
+            util.removeItem(_callbacks, newCallback);
+        };
+    };
 
     let active = false;
+    const _stackEntry = [deps, atom];
 
     atom._activate = () => {
         if (!active) {
@@ -181,9 +189,8 @@ exports.createElement = function(tagName, props, children) {
             }
 
             if (!util.isNull(children)) {
-                for (let i = 0; i < children.length; i++) {
+                for (let i = 0; i < children.length; i++)
                     children[i].create();
-                }
             }
         },
         mount: (ARG_anchor) => {
@@ -210,9 +217,8 @@ exports.createElement = function(tagName, props, children) {
                 }
 
                 if (!util.isNull(children)) {
-                    for (let i = 0; i < children.length; i++) {
+                    for (let i = 0; i < children.length; i++)
                         children[i].mount(_domElement);
-                    }
                 }
 
                 _mounted = true;
@@ -221,14 +227,12 @@ exports.createElement = function(tagName, props, children) {
         unmount: (unmountDOMFlag) => {
             if (_mounted) {
                 if (!util.isNull(children)) {
-                    for (let i = 0; i < children.length; i++) {
+                    for (let i = 0; i < children.length; i++)
                         children[i].unmount();
-                    }
                 }
 
-                for (let i = 0; i < _disposeCallbacks.length; i++) {
+                for (let i = 0; i < _disposeCallbacks.length; i++)
                     _disposeCallbacks[i]();
-                }
                 _disposeCallbacks = [];
 
                 _mounted = false;
@@ -303,7 +307,7 @@ exports.createText = function(ARG_text) {
 let CURRENT_INITIALIZING_COMPONENT = null;
 
 exports.createComponent = function(initFunc) {
-    const vDomNode = { _onMountHook: null, _onUnmountHook: null, _atoms: [] };
+    const vDomNode = { _atoms: [], _onMountHooks: [], _onUnmountHooks: [] };
 
     CURRENT_INITIALIZING_COMPONENT = vDomNode;
     const _childVDomNode = initFunc();
@@ -314,17 +318,23 @@ exports.createComponent = function(initFunc) {
     };
 
     vDomNode.mount = (anchor) => {
+        for (let i = 0; i < vDomNode._atoms.length; i++)
+            vDomNode._atoms[i]._activate();
+
         _childVDomNode.mount(anchor);
 
-        if (!util.isNull(vDomNode._onMountHook))
-            vDomNode._onMountHook();
+        for (let i = 0; i < vDomNode._onMountHooks.length; i++)
+            vDomNode._onMountHooks[i]();
     };
 
     vDomNode.unmount = (unmountDOMFlag) => {
-        if (!util.isNull(vDomNode._onUnmountHook))
-            vDomNode._onUnmountHook();
+        for (let i = 0; i < vDomNode._onUnmountHooks.length; i++)
+            vDomNode._onUnmountHooks[i]();
 
         _childVDomNode.unmount(unmountDOMFlag);
+
+        for (let i = 0; i < vDomNode._atoms.length; i++)
+            vDomNode._atoms[i]._deactivate();
     };
 
     vDomNode.type = 'component';
@@ -332,12 +342,14 @@ exports.createComponent = function(initFunc) {
     return vDomNode;
 };
 
-exports.onMount = function(hook) { // gets called after mounting.
-    CURRENT_INITIALIZING_COMPONENT._onMountHook = hook;
+// onMount hooks gets called after mounting.
+exports.onMount = function(hook) {
+    CURRENT_INITIALIZING_COMPONENT._onMountHooks.push(hook);
 };
 
-exports.onUnmount = function(hook) { // gets called before unmounting.
-    CURRENT_INITIALIZING_COMPONENT._onUnmountHook = hook;
+// onUnmount hooks gets called before unmounting.
+exports.onUnmount = function(hook) {
+    CURRENT_INITIALIZING_COMPONENT._onUnmountHooks.push(hook);
 };
 
 exports.useAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
@@ -349,19 +361,16 @@ exports.useAtom = function(ARG_value, deps, passCallbackArgsAsArray) {
 exports.createFragment = function(children) {
     const vDomNode = {
         create: () => {
-            for (let i = 0; i < children.length; i++) {
+            for (let i = 0; i < children.length; i++)
                 children[i].create();
-            }
         },
         mount: (anchor) => {
-            for (let i = 0; i < children.length; i++) {
+            for (let i = 0; i < children.length; i++)
                 children[i].mount(anchor);
-            }
         },
         unmount: (unmountDOMFlag) => {
-            for (let i = 0; i < children.length; i++) {
+            for (let i = 0; i < children.length; i++)
                 children[i].unmount(unmountDOMFlag);
-            }
         }
     };
 
@@ -403,6 +412,7 @@ exports.createIf = function(ARG_conditions, children) {
         mount: (ARG_anchor) => {
             _anchor = ARG_anchor;
 
+            _atom._activate();
             _dispose = _atom.listen((conditions) => {
                 _activateCondition(conditions.indexOf(true), false);
             });
@@ -416,6 +426,7 @@ exports.createIf = function(ARG_conditions, children) {
 
             _dispose();
             _dispose = null;
+            _atom._deactivate();
 
             _anchor = null;
         }
@@ -431,8 +442,10 @@ exports.createRoot = function(anchor) {
 
     return {
         render: (target) => {
+            if (util.isUdf(target)) target = null;
+
             if (!util.isNull(_rootVDomNode)) {
-                _rootVDomNode.unmount(true);
+                _rootVDomNode.unmount(true); // physically unmount
             }
             _rootVDomNode = target;
 

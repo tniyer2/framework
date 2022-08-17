@@ -11,6 +11,14 @@ const MyComponent = () => {
         console.log('MyComponent is unmounting.');
     });
 
+    fm.onUnmount(() => {
+        console.log('Second onUnmount Hook.');
+    })
+
+    fm.onMount(() => {
+        console.log('Second onMount Hook.');
+    })
+
     const buttonText = fm.useAtom('Hello World!');
     const derivedButtonText = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
 
