@@ -2,6 +2,8 @@
 const firstIfCondition = fm.createAtom(false);
 const secondIfCondition = fm.createAtom(false);
 
+const texts = fm.createAtom([fm.createAtom('red')]);
+
 const MyComponent = () => {
     fm.onMount(() => {
         console.log('MyComponent is mounting.');
@@ -50,6 +52,15 @@ const MyComponent = () => {
                 fm.createElement('div', null, [
                     fm.createText('Else is true.')
                 ])
+            ]),
+            fm.createElement('ul', null, [
+                fm.createFor((props) => {
+                    return (
+                        fm.createElement('li', {style: fm.useAtom((color) => 'background-color: ' + color + ';', [props])}, [
+                            fm.createText(fm.useAtom((color) => 'This element\'s color is ' + color + '.', [props]))
+                        ])
+                    );
+                }, texts)
             ])
         ])
     );
@@ -87,11 +98,20 @@ setTimeout(function(){
             ])
         ])
     );
+
+    const vals = texts();
+    vals.splice(1, 0, fm.createAtom('blue'));
+    texts.update(vals);
 }, 3000);
 
 setTimeout(function(){
     root.render(fm.createElement('div', {id: 'new-parent-element'}, [
         rootVDomNode
     ]));
+
+    const vals = texts();
+    vals.splice(0, 1);
+    vals.splice(0, 0, fm.createAtom('purple'));
+    texts.update(vals);
 }, 5000);
 
