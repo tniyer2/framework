@@ -15,11 +15,11 @@ const MyComponent = () => {
 
     fm.onUnmount(() => {
         console.log('Second onUnmount Hook.');
-    })
+    });
 
     fm.onMount(() => {
         console.log('Second onMount Hook.');
-    })
+    });
 
     const buttonText = fm.useAtom('Hello World!');
     const derivedButtonText = fm.useAtom((a) => a + ' Some Extra Text.', [buttonText]);
@@ -39,8 +39,8 @@ const MyComponent = () => {
                     fm.createText('another line of text')
                 ])
             ]),
-            fm.createElement('div', null, [
-                fm.createText('Another Div Element.')
+            fm.createElement('div', {id: firstIfCondition}, [
+                fm.createText(fm.useAtom((c) => 'Another Div Element: ' + c, [firstIfCondition]))
             ]),
             fm.createIf([firstIfCondition, secondIfCondition, fm.createAtom(true)], [
                 fm.createElement('div', null, [
