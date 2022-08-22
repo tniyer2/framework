@@ -4,7 +4,6 @@ const util = {
     noop: () => {},
     pass: (a) => a,
     isUdf: (a) => typeof a === 'undefined',
-    isNull: (a) => a === null,
     removeItem: (a, item) => {
         let i = a.indexOf(item);
         if (i < 0 || i >= a.length) return;
@@ -25,7 +24,7 @@ const UPDATE_ATOMS = () => {
     for (let i = 0; i < ATOM_STACK.length; i++) {
         const [deps, atom] = ATOM_STACK[i];
 
-        if (util.isNull(deps)) { // if a source atom.
+        if (deps === null) { // if a source atom.
             if (atom._dirty === true)
                 atom._update();
         }
@@ -90,7 +89,7 @@ exports.createAtom = function(ARG_value, deps, passDepsInArray) {
 
     let _onActive;
 
-    if (util.isNull(deps)) { // if a source atom.
+    if (deps === null) { // if a source atom.
         _value = ARG_value;
 
         // update() is only defined on source atoms.
@@ -152,7 +151,7 @@ exports.createAtom = function(ARG_value, deps, passDepsInArray) {
 const startsWith_on = (s) => s[0] === 'o' && s[1] === 'n';
 
 exports.createElement = function(tagName, props, children) {
-    const _propKeys = util.isNull(props) ? null : Object.keys(props);    
+    const _propKeys = props === null ? null : Object.keys(props);
 
     let _domElement;
     let _parentVDomNode;
@@ -168,7 +167,7 @@ exports.createElement = function(tagName, props, children) {
         create: () => {
             _domElement = document.createElement(tagName);
 
-            if (!util.isNull(children)) {
+            if (children !== null) {
                 for (let i = 0; i < children.length; i++)
                     children[i].create();
             }
@@ -190,7 +189,7 @@ exports.createElement = function(tagName, props, children) {
             }
 
             if (!_mounted) {
-                if (!util.isNull(props)) {
+                if (props !== null) {
                     for (let i = 0; i < _propKeys.length; i++) {
                         const attrib = _propKeys[i];
                         const prop = props[attrib];
@@ -211,7 +210,7 @@ exports.createElement = function(tagName, props, children) {
                     }
                 }
 
-                if (!util.isNull(children)) {
+                if (children !== null) {
                     for (let i = 0; i < children.length; i++)
                         children[i].mount(vDomNode, _domElement);
                 }
@@ -221,7 +220,7 @@ exports.createElement = function(tagName, props, children) {
         },
         unmount: (unmountDOMFlag) => {
             if (_mounted) {
-                if (!util.isNull(children)) {
+                if (children !== null) {
                     for (let i = 0; i < children.length; i++)
                         children[i].unmount();
                 }
@@ -243,7 +242,7 @@ exports.createElement = function(tagName, props, children) {
 
             for (let i = index+1; i < children.length; i++) {
                 const e = children[i].getFirstElement();
-                if (!util.isNull(e)) return e;
+                if (e !== null) return e;
             }
             return null;
         },
@@ -305,7 +304,7 @@ exports.createText = function(ARG_text) {
             }
 
             if (_mounted) {
-                if (!util.isNull(_dispose)) {
+                if (_dispose !== null) {
                     _dispose();
                     _dispose = null;
                 }
@@ -408,14 +407,14 @@ exports.createFragment = function(children) {
 
             for (let i = index+1; i < children.length; i++) {
                 const e = children[i].getFirstElement();
-                if (!util.isNull(e)) return e;
+                if (e !== null) return e;
             }
             return _parentVDomNode.getNodeAfter(vDomNode);
         },
         getFirstElement: () => {
             for (let i = 0; i < children.length; i++) {
                 const e = children[i].getFirstElement();
-                if (!util.isNull(e)) return e;
+                if (e !== null) return e;
             }
             return null;
         }
@@ -516,7 +515,7 @@ exports.createFor = function(component, atom) {
         for (let i = 0; i < newItems.length; i++) {
             const item = newItems[i];
 
-            if (!util.isUdf(item) && !util.isNull(item) && !(item._id in newAtomIDs)) {
+            if (!util.isUdf(item) && item !== null && !(item._id in newAtomIDs)) {
                 newAtomIDs[item._id] = i;
                 temp.push(item);
             }
@@ -590,14 +589,14 @@ exports.createFor = function(component, atom) {
 
             for (let i = index+1; i < _childVDomNodes.length; i++) {
                 const e = _childVDomNodes[i].getFirstElement();
-                if (!util.isNull(e)) return e;
+                if (e !== null) return e;
             }
             return _parentVDomNode.getNodeAfter(vDomNode);
         },
         getFirstElement: () => {
             for (let i = 0; i < _childVDomNodes.length; i++) {
                 const e = _childVDomNodes[i].getFirstElement();
-                if (!util.isNull(e)) return e;
+                if (e !== null) return e;
             }
             return null;
         }
@@ -615,11 +614,11 @@ exports.createRoot = function(anchor) {
         render: (target) => {
             if (util.isUdf(target)) target = null;
 
-            if (!util.isNull(_rootVDomNode))
+            if (_rootVDomNode !== null)
                 _rootVDomNode.unmount(true); // physically unmount
             _rootVDomNode = target;
 
-            if (!util.isNull(_rootVDomNode)) {
+            if (_rootVDomNode !== null) {
                 _rootVDomNode.create();
                 _rootVDomNode.mount(rootObject, anchor);
             }
@@ -632,4 +631,3 @@ exports.createRoot = function(anchor) {
 
 return exports;
 }());
-
