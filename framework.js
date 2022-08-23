@@ -70,7 +70,8 @@ exports.createAtom = function(ARG_value, deps, passDepsInArray) {
 
     let _value;
 
-    const atom = () => _value;
+    const atom = {};
+    atom.value = () => _value;
     atom._dirty = false;
     atom._id = ATOM_ID_COUNTER++;
     atom._type = 'atom';
@@ -110,7 +111,7 @@ exports.createAtom = function(ARG_value, deps, passDepsInArray) {
         const _updateDerivedValue = () => {
             const depValues = Array(deps.length);
             for (let i = 0; i < deps.length; i++)
-                depValues[i] = deps[i]();
+                depValues[i] = deps[i].value();
 
             _value = passDepsInArray === true ?
                 ARG_value(depValues) : ARG_value(...depValues);
@@ -175,8 +176,8 @@ exports.createElement = function(tagName, props, children) {
                     children[i].create(vDomNode, _domElement);
             }
         },
-        mount: (insertMountFlag) => {
-            if (!_mountedDOM) {
+        mount: (insertMountFlag, remountFlag) => {
+            if (!_mountedDOM || remountFlag) {
                 if (insertMountFlag) {
                     const after = _parentVDomNode.getNodeAfter(vDomNode);
                     _anchor.insertBefore(_domElement, after);
@@ -194,7 +195,7 @@ exports.createElement = function(tagName, props, children) {
                         const prop = props[attrib];
 
                         if (prop._type === 'atom') { // if a dynamic attribute.
-                            _domElement.setAttribute(attrib, prop());
+                            _domElement.setAttribute(attrib, prop.value());
                             _disposeCallbacks.push(prop.listen((newValue) => {
                                 _domElement.setAttribute(attrib, newValue);
                             }));
@@ -211,7 +212,7 @@ exports.createElement = function(tagName, props, children) {
 
                 if (children !== null) {
                     for (let i = 0; i < children.length; i++)
-                        children[i].mount();
+                        children[i].mount(false, false);
                 }
 
                 _mounted = true;
@@ -274,10 +275,10 @@ exports.createText = function(ARG_text) {
             const value = ARG_text._type === 'atom' ? '' : ARG_text;
             _domTextNode = document.createTextNode(value);
         },
-        mount: (insertMountFlag) => {
-            if (!_mounted) {
+        mount: (insertMountFlag, remountFlag) => {
+            if (!_mounted || remountFlag) {
                 if (ARG_text._type === 'atom') {
-                    _domTextNode.nodeValue = ARG_text();
+                    _domTextNode.nodeValue = ARG_text.value();
                     _dispose = ARG_text.listen((newValue) => {
                         _domTextNode.nodeValue = newValue;
                     });
@@ -336,11 +337,11 @@ exports.createComponent = function(initFunc, props) {
         _childVDomNode.create(vDomNode, anchor);
     };
 
-    vDomNode.mount = (insertMountFlag) => {
+    vDomNode.mount = (insertMountFlag, remountFlag) => {
         for (let i = 0; i < vDomNode._atoms.length; i++)
             vDomNode._atoms[i]._activate();
 
-        _childVDomNode.mount(insertMountFlag);
+        _childVDomNode.mount(insertMountFlag, remountFlag);
 
         for (let i = 0; i < vDomNode._onMountHooks.length; i++)
             vDomNode._onMountHooks[i]();
@@ -392,9 +393,9 @@ exports.createFragment = function(children) {
             for (let i = 0; i < children.length; i++)
                 children[i].create(vDomNode, anchor);
         },
-        mount: (insertMountFlag) => {
+        mount: (insertMountFlag, remountFlag) => {
             for (let i = 0; i < children.length; i++)
-                children[i].mount(insertMountFlag);
+                children[i].mount(insertMountFlag, remountFlag);
         },
         unmount: (unmountDOMFlag) => {
             for (let i = 0; i < children.length; i++)
@@ -435,7 +436,7 @@ exports.createIf = function(ARG_conditions, children) {
 
     const vDomNode = {};
 
-    const _activateCondition = (newIndex, remountFlag, insertMountFlag) => {
+    const _activateCondition = (newIndex, insertMountFlag, remountFlag) => {
         const prevIndex = _activeConditionIndex;
         const indexChanged = prevIndex !== newIndex;
 
@@ -447,7 +448,7 @@ exports.createIf = function(ARG_conditions, children) {
                 children[newIndex].create(vDomNode, _anchor);
                 _isCreated[newIndex] = true;
             }
-            children[newIndex].mount(insertMountFlag);
+            children[newIndex].mount(insertMountFlag, remountFlag);
         }
 
         _activeConditionIndex = newIndex;
@@ -458,13 +459,13 @@ exports.createIf = function(ARG_conditions, children) {
         _anchor = anchor;
     };
 
-    vDomNode.mount = (insertMountFlag) => {
+    vDomNode.mount = (insertMountFlag, remountFlag) => {
         _atom._activate();
         _dispose = _atom.listen((conditions) => {
-            _activateCondition(conditions.indexOf(true), false, true);
+            _activateCondition(conditions.indexOf(true), true, false);
         });
 
-        _activateCondition(_atom().indexOf(true), true, insertMountFlag);
+        _activateCondition(_atom.value().indexOf(true), insertMountFlag, true);
     };
 
     vDomNode.unmount = (unmountDOMFlag) => {
@@ -499,7 +500,7 @@ exports.createFor = function(component, atom) {
 
     let _dispose;
 
-    const reconcileElements = (newItems, insertMountFlag) => {
+    const reconcileElements = (newItems, insertMountFlag, remountFlag) => {
         const oldAtomIDs = _atomIDs;
         const oldItems = _items;
         const oldChildVDomNodes = _childVDomNodes;
@@ -543,6 +544,8 @@ exports.createFor = function(component, atom) {
             }
         }
 
+        const swappedIndexes = Object.create(null);
+
         _items = [...newItems];
         _atomIDs = newAtomIDs;
         _childVDomNodes = [];
@@ -550,8 +553,10 @@ exports.createFor = function(component, atom) {
         _mountingChildren = true;
         // Remount vDOM nodes for all existing and newly added items.
         for (let i = 0; i < newChildVDomNodes.length; i++) {
+            const remountChild = i in swappedIndexes ? true : remountFlag;
+
             _childVDomNodes.push(newChildVDomNodes[i]);
-            _childVDomNodes[i].mount(insertMountFlag);
+            _childVDomNodes[i].mount(insertMountFlag, remountFlag);
         }
         _mountingChildren = false;
     };
@@ -561,13 +566,13 @@ exports.createFor = function(component, atom) {
             _parentVDomNode = parentVDomNode;
             _anchor = anchor;
         },
-        mount: (insertMountFlag) => {
+        mount: (insertMountFlag, remountFlag) => {
             atom._activate();
             _dispose = atom.listen((items) => {
-                reconcileElements(items, true);
+                reconcileElements(items, true, true/*change this to false later on*/);
             });
 
-            reconcileElements(atom(), insertMountFlag);
+            reconcileElements(atom.value(), insertMountFlag, remountFlag);
         },
         unmount: (unmountDOMFlag) => {
             for (let i = 0; i < _childVDomNodes.length; i++) {
@@ -618,7 +623,7 @@ exports.createRoot = function(anchor) {
                     _rootVDomNode.create(rootObject, anchor);
                     _rootVDomNode.isCreated = true;
                 }
-                _rootVDomNode.mount();
+                _rootVDomNode.mount(false, false);
             }
         },
         getNodeAfter: (childVDomNode) => null

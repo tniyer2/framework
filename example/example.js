@@ -27,7 +27,7 @@ const MyComponent = () => {
     const onClick = (e) => {
         console.log('Hello World!');
         buttonText.update('Updated!');
-        firstIfCondition.update(!firstIfCondition());
+        firstIfCondition.update(!firstIfCondition.value());
     };
 
     return (
@@ -74,12 +74,12 @@ root.render(rootVDomNode);
 setTimeout(function(){
     const firstOnClick = () => {
         console.log('Clicked Button 1.');
-        firstIfCondition.update(!firstIfCondition());
+        firstIfCondition.update(!firstIfCondition.value());
     };
 
     const secondOnClick = () => {
         console.log('Clicked Button 2.');
-        secondIfCondition.update(!secondIfCondition());
+        secondIfCondition.update(!secondIfCondition.value());
     };
 
     root.render(
@@ -99,7 +99,7 @@ setTimeout(function(){
         ])
     );
 
-    const vals = texts();
+    const vals = texts.value();
     vals.splice(1, 0, fm.createAtom('blue'));
     texts.update(vals);
 }, 3000);
@@ -107,7 +107,7 @@ setTimeout(function(){
 setTimeout(function(){
     root.render(rootVDomNode);
 
-    const vals = texts();
+    const vals = texts.value();
     vals.splice(0, 1);
     vals.splice(0, 0, fm.createAtom('purple'));
     texts.update(vals);
