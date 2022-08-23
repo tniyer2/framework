@@ -105,9 +105,7 @@ setTimeout(function(){
 }, 3000);
 
 setTimeout(function(){
-    root.render(fm.createElement('div', {id: 'new-parent-element'}, [
-        rootVDomNode
-    ]));
+    root.render(rootVDomNode);
 
     const vals = texts();
     vals.splice(0, 1);
