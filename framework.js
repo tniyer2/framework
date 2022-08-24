@@ -262,7 +262,7 @@ class TextNode {
         this._domTextNode = document.createTextNode(value);
     }
     mount(insertMountFlag, remountFlag) {
-        if (!this._mounted || remountFlag) {
+        if (!this._mounted) {
             if (this._text._type === 'atom') {
                 this._domTextNode.nodeValue = this._text.value();
                 this._dispose = this._text.listen((newValue) => {
@@ -272,7 +272,7 @@ class TextNode {
             this._mounted = true;
         }
 
-        if (!this._mountedDOM) {
+        if (!this._mountedDOM || remountFlag) {
             if (insertMountFlag) {
                 const after = this._parentVDomNode.getNodeAfter(this);
                 this._anchor.insertBefore(this._domTextNode, after);
@@ -341,11 +341,11 @@ class Component {
         for (let i = 0; i < this._atoms.length; i++)
             this._atoms[i].deactivate();
     }
-    getNodeAfter(childVDomNode) {
-        this._parentVDomNode.getNodeAfter(this);
+    getNodeAfter(_/*childVDomNode*/) {
+        return this._parentVDomNode.getNodeAfter(this);
     }
     getFirstElement() {
-        this._childVDomNode.getFirstElement();
+        return this._childVDomNode.getFirstElement();
     }
 };
 exports.createComponent = (a, b) => new Component(a, b);
@@ -434,7 +434,7 @@ class IfNode {
         this._parentVDomNode = parentVDomNode;
         this._anchor = anchor;
     }
-    mount(insertMountFlag, remountFlag) {
+    mount(insertMountFlag, _/*remountFlag*/) {
         this._atom.activate();
         this._dispose = this._atom.listen((conditions) => {
             this._activateCondition(conditions.indexOf(true), true, false);
@@ -450,7 +450,7 @@ class IfNode {
         this._dispose = null;
         this._atom.deactivate();
     }
-    getNodeAfter(childVDomNode) {
+    getNodeAfter(_/*childVDomNode*/) {
         return this._parentVDomNode.getNodeAfter(this);
     }
     getFirstElement() {
@@ -472,6 +472,56 @@ class ForNode {
 
         this.type = 'for';
     }
+    _findSortIndex(arr, e) {
+        let low = 0;
+        let high = arr.length;
+        let mid;
+
+        while (low < high) {
+            mid = Math.floor((low + high) / 2);
+            if (arr[mid] < e)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        return low;
+    }
+    _calcSwappedIndexes(unchangedIndexes) {
+        const seq = []; // longest increasing sequence.
+        const seqIndex = []; // indexes of longest increasing sequence.
+        const path = Array(unchangedIndexes.length).fill(-1);
+
+        for (let i = 0; i < unchangedIndexes.length; i++) {
+            const order = unchangedIndexes[i];
+            if (util.isUdf(order)) continue;
+
+            if (seq.length === 0 || seq[seq.length-1] < order) {
+                path[i] = seqIndex.length === 0 ? -1 : seqIndex[seqIndex.length-1];
+                seq.push(order);
+                seqIndex.push(i);
+            }
+            else {
+                const j = this._findSortIndex(seq, order);
+                path[i] = j === 0 ? -1 : seqIndex[j-1];
+                seq[j] = order;
+                seqIndex[j] = i;
+            }
+        }
+
+        const swapped = Object.create(null);
+        let i = seqIndex[seqIndex.length-1];
+        while (i >= 0) {
+            swapped[i] = false; // if in longest seqeunce index is unchanged.
+            i = path[i];
+        }
+
+        for (let i = 0; i < unchangedIndexes.length; i++) {
+            if (!util.isUdf(unchangedIndexes[i]) && !(i in swapped))
+                swapped[i] = true; // if not in longest sequence index is swapped.
+        }
+
+        return swapped;
+    }
     _reconcileElements(newItems, insertMountFlag, remountFlag) {
         const oldAtomIDs = this._atomIDs;
         const oldItems = this._items;
@@ -491,13 +541,17 @@ class ForNode {
         newItems = temp;
 
         const newChildVDomNodes = Array(newItems.length);
+        const unchangedIndexes = Array(newItems.length);
+        let orderCounter = 0;
 
         for (let i = 0; i < oldItems.length; i++) {
             const oldItem = oldItems[i];
 
             if (oldItem._id in newAtomIDs) {
-                // Swap vDOM node.
-                newChildVDomNodes[newAtomIDs[oldItem._id]] = oldChildVDomNodes[i];
+                // Unchanged vDOM node.
+                const newIndex = newAtomIDs[oldItem._id];
+                unchangedIndexes[newIndex] = orderCounter++;
+                newChildVDomNodes[newIndex] = oldChildVDomNodes[i];
             }
             else {
                 // When item is removed, unmount old vDOM node.
@@ -506,31 +560,41 @@ class ForNode {
         }
 
         // Create vDOM nodes for newly added items.
+        const addedIndexes = Object.create(null);
         for (let i = 0; i < newItems.length; i++) {
             const newItem = newItems[i];
 
             if (!(newItem._id in oldAtomIDs)) {
+                addedIndexes[i] = true;
                 const child = exports.createComponent(this._component, newItem);
                 child.create(this, this._anchor);
                 newChildVDomNodes[i] = child;
             }
         }
 
-        const swappedIndexes = Object.create(null);
-
         this._items = [...newItems];
         this._atomIDs = newAtomIDs;
-        this._childVDomNodes = [];
 
-        this._mountingChildren = true;
-        // Remount vDOM nodes for all existing and newly added items.
-        for (let i = 0; i < newChildVDomNodes.length; i++) {
-            const remountChild = i in swappedIndexes ? true : remountFlag;
-
-            this._childVDomNodes.push(newChildVDomNodes[i]);
-            this._childVDomNodes[i].mount(insertMountFlag, remountFlag);
+        if (remountFlag) {
+            this._childVDomNodes = [];
+            for (let i = 0; i < newChildVDomNodes.length; i++) {
+                const child = newChildVDomNodes[i];
+                this._childVDomNodes.push(child); // this line must come before mount is called.
+                child.mount(insertMountFlag, true);
+            }
         }
-        this._mountingChildren = false;
+        else {
+            this._mountingChildren = true;
+
+            this._swappedIndexes = this._calcSwappedIndexes(unchangedIndexes);
+
+            this._childVDomNodes = newChildVDomNodes;
+            for (let i = 0; i < this._childVDomNodes.length; i++) {
+                this._childVDomNodes[i].mount(true, this._swappedIndexes[i] === true || i in addedIndexes);
+            }
+
+            this._mountingChildren = false;
+        }
     }
     create(parentVDomNode, anchor) {
         this._parentVDomNode = parentVDomNode;
@@ -539,7 +603,7 @@ class ForNode {
     mount(insertMountFlag, remountFlag) {
         this._atom.activate();
         this._dispose = this._atom.listen((items) => {
-            this._reconcileElements(items, true, true/*change this to false later on*/);
+            this._reconcileElements(items, true, false);
         });
 
         this._reconcileElements(this._atom.value(), insertMountFlag, remountFlag);
@@ -558,12 +622,18 @@ class ForNode {
         const index = this._childVDomNodes.indexOf(childVDomNode);
 
         for (let i = index+1; i < this._childVDomNodes.length; i++) {
+            if (this._mountingChildren && this._swappedIndexes[i] !== false)
+                continue;
+
             const e = this._childVDomNodes[i].getFirstElement();
             if (e !== null) return e;
         }
         return this._parentVDomNode.getNodeAfter(this);
     }
     getFirstElement() {
+        if (this._mountingChildren)
+            throw new Error('this._mountingChildren should be false.');
+
         for (let i = 0; i < this._childVDomNodes.length; i++) {
             const e = this._childVDomNodes[i].getFirstElement();
             if (e !== null) return e;
@@ -593,7 +663,7 @@ class RootNode {
             this._node.mount(false, false);
         }
     }
-    getNodeAfter(childVDomNode) {
+    getNodeAfter(_/*childVDomNode*/) {
         return null;
     }
 };
