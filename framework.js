@@ -1,8 +1,6 @@
 
 const fm = (function(){
 const util = {
-    noop: () => {},
-    pass: (a) => a,
     isUdf: (a) => typeof a === 'undefined',
     removeItem: (a, item) => {
         let i = a.indexOf(item);
@@ -22,15 +20,15 @@ const ATOM_STACK = [];
 const UPDATE_ATOMS = () => {
     // 1. Call _update() on all dirty atoms.
     for (let i = 0; i < ATOM_STACK.length; i++) {
-        const [deps, atom] = ATOM_STACK[i];
+        const atom = ATOM_STACK[i];
 
-        if (deps === null) { // if a source atom.
+        if (atom._isSource) {
             if (atom._dirty === true)
                 atom._update();
         }
-        else { // if a derived atom.
-            for (let i = 0; i < deps.length; i++) {
-                if (deps[i]._dirty === true) {
+        else {
+            for (let i = 0; i < atom._deps.length; i++) {
+                if (atom._deps[i]._dirty === true) {
                     atom._update();
                     break;
                 }
@@ -40,7 +38,7 @@ const UPDATE_ATOMS = () => {
 
     // 2. Set all atoms to not dirty.
     for (let i = 0; i < ATOM_STACK.length; i++) {
-        const [_, atom] = ATOM_STACK[i];
+        const atom = ATOM_STACK[i];
         atom._dirty = false;
     }
 };
@@ -61,312 +59,296 @@ const exports = {};
 let ATOM_ID_COUNTER = 0;
 
 /*
-ARG_value should be the initial value or a derivation function if deps is not undefined or null.
-deps must be undefined, null, or a non-empty Array.
-if passDepsInArray is true, dependency values will be passed to derivation function in an array.
+value: initial value of atom or a function if deps is an Array.
+deps: must be undefined, null, or a non-empty Array.
+passDepsInArray: if true, dependency values will be passed to derivation function as an array.
 */
-exports.createAtom = function(ARG_value, deps, passDepsInArray) {
-    if (util.isUdf(deps)) deps = null; // default value if caller does not pass argument.
+class Atom {
+    constructor(value, deps, passDepsInArray) {
+        this._deps = util.isUdf(deps) ? null : deps; // default value if caller does not pass argument.
+        this._isSource = this._deps === null;
+        this._passDepsInArray = passDepsInArray === true;
 
-    let _value;
+        this._type = 'atom';
+        this._id = ATOM_ID_COUNTER++;
 
-    const atom = {};
-    atom.value = () => _value;
-    atom._dirty = false;
-    atom._id = ATOM_ID_COUNTER++;
-    atom._type = 'atom';
+        this._active = false;
+        this._dirty = false;
+        this._callbacks = [];
 
-    const _callbacks = [];
-    const _callCallbacks = () => {
-        for (let i = 0; i < _callbacks.length; i++)
-            _callbacks[i](_value);
-    };
-    atom.listen = (newCallback) => {
-        _callbacks.push(newCallback);
+        if (this._isSource) {
+            this._value = value;
+
+            this.update = (newValue) => {
+                this._value = newValue;
+                this._dirty = true;
+                SCHEDULE_ATOM_UPDATE();
+            };
+        }
+        else {
+            // this._deps should be a non-empty array
+            this._derivationFunc = value;
+        }
+
+        this.activate();
+    }
+    _callCallbacks() {
+        for (let i = 0; i < this._callbacks.length; i++)
+            this._callbacks[i](this._value);
+    }
+    _updateDerivedValue() {
+        const values = Array(this._deps.length);
+        for (let i = 0; i < this._deps.length; i++)
+            values[i] = this._deps[i].value();
+
+        this._value = this._passDepsInArray ?
+            this._derivationFunc(values) : this._derivationFunc(...values);
+    }
+    _update () {
+        if (!this._isSource) {
+            this._updateDerivedValue();
+            this._dirty = true;
+        }
+        this._callCallbacks();
+    }
+    value() {
+        return this._value;
+    }
+    listen(newCallback) {
+        this._callbacks.push(newCallback);
         return () => {
-            util.removeItem(_callbacks, newCallback);
+            util.removeItem(this._callbacks, newCallback);
         };
-    };
-
-    let _onActive;
-
-    if (deps === null) { // if a source atom.
-        _value = ARG_value;
-
-        // update() is only defined on source atoms.
-        atom.update = (newValue) => {
-            _value = newValue;
-            atom._dirty = true;
-            SCHEDULE_ATOM_UPDATE();
-        };
-
-        atom._update = _callCallbacks;
-
-        _onActive = util.noop;
     }
-    else { // if a derived atom.
-        // assert(typeof deps === non-empty array)
-        // assert(typeof ARG_value === function)
-
-        const _updateDerivedValue = () => {
-            const depValues = Array(deps.length);
-            for (let i = 0; i < deps.length; i++)
-                depValues[i] = deps[i].value();
-
-            _value = passDepsInArray === true ?
-                ARG_value(depValues) : ARG_value(...depValues);
-        };
-
-        atom._update = () => {
-            _updateDerivedValue();
-            atom._dirty = true;
-            _callCallbacks();
-        };
-
-        _onActive = _updateDerivedValue;
+    activate() {
+        if (!this._active) {
+            ATOM_STACK.push(this);
+            if (!this._isSource)
+                this._updateDerivedValue();
+            this._active = true;
+        }
     }
-
-    let active = false;
-    const _stackEntry = [deps, atom];
-
-    atom._activate = () => {
-        if (!active) {
-            ATOM_STACK.push(_stackEntry);
-            active = true;
-
-            _onActive();
+    deactivate() {
+        if (this._active) {
+            util.removeItem(ATOM_STACK, this);
+            this._active = false;
         }
-    };
-
-    atom._deactivate = () => {
-        if (active) {
-            util.removeItem(ATOM_STACK, _stackEntry);
-            active = false;
-        }
-    };
-
-    atom._activate();
-    return atom;
+    }
 };
+exports.createAtom = (a, b, c) => new Atom(a, b, c);
 
 const startsWith_on = (s) => s[0] === 'o' && s[1] === 'n';
 
-exports.createElement = function(tagName, props, children) {
-    const _propKeys = props === null ? null : Object.keys(props);
+class ElementNode {
+    constructor(tagName, props, children) {
+        this._tagName = tagName;
+        this._props = props;
+        this._propKeys = this._props === null ? null : Object.keys(this._props);
+        this._children = children;
 
-    let _domElement;
-    let _parentVDomNode;
-    let _anchor;
+        // _mounted and _mountedDOM = both false, both true, false + true, but never true + false.
+        this._mounted = false;
+        this._mountedDOM = false;
 
-    // _mounted and _mountedDOM = both false, both true, false + true, but never true + false.
-    let _mounted = false;
-    let _mountedDOM = false;
+        this._disposeCallbacks = [];
+        
+        this.type = 'element';
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        this._anchor = anchor;
 
-    let _disposeCallbacks = [];
+        this._domElement = document.createElement(this._tagName);
 
-    const vDomNode = {
-        create: (parentVDomNode, anchor) => {
-            _parentVDomNode = parentVDomNode;
-            _anchor = anchor;
-
-            _domElement = document.createElement(tagName);
-
-            if (children !== null) {
-                for (let i = 0; i < children.length; i++)
-                    children[i].create(vDomNode, _domElement);
+        if (this._children !== null) {
+            for (let i = 0; i < this._children.length; i++)
+                this._children[i].create(this, this._domElement);
+        }
+    }
+    mount(insertMountFlag, remountFlag) {
+        if (!this._mountedDOM || remountFlag) {
+            if (insertMountFlag) {
+                const after = this._parentVDomNode.getNodeAfter(this);
+                this._anchor.insertBefore(this._domElement, after);
             }
-        },
-        mount: (insertMountFlag, remountFlag) => {
-            if (!_mountedDOM || remountFlag) {
-                if (insertMountFlag) {
-                    const after = _parentVDomNode.getNodeAfter(vDomNode);
-                    _anchor.insertBefore(_domElement, after);
-                }
-                else {
-                    _anchor.appendChild(_domElement);
-                }
-                _mountedDOM = true;
+            else {
+                this._anchor.appendChild(this._domElement);
             }
+            this._mountedDOM = true;
+        }
 
-            if (!_mounted) {
-                if (props !== null) {
-                    for (let i = 0; i < _propKeys.length; i++) {
-                        const attrib = _propKeys[i];
-                        const prop = props[attrib];
+        if (!this._mounted) {
+            if (this._props !== null) {
+                for (let i = 0; i < this._propKeys.length; i++) {
+                    const attrib = this._propKeys[i];
+                    const prop = this._props[attrib];
 
-                        if (prop._type === 'atom') { // if a dynamic attribute.
-                            _domElement.setAttribute(attrib, prop.value());
-                            _disposeCallbacks.push(prop.listen((newValue) => {
-                                _domElement.setAttribute(attrib, newValue);
-                            }));
-                        }
-                        else if (startsWith_on(attrib)) { // if an event listener attribute.
-                            const type = attrib.slice(2).toLowerCase();
-                            _domElement.addEventListener(type, prop);
-                        }
-                        else { // if a static attribute.
-                            _domElement.setAttribute(attrib, prop);
-                        }
+                    if (prop._type === 'atom') { // if a dynamic attribute.
+                        this._domElement.setAttribute(attrib, prop.value());
+                        this._disposeCallbacks.push(prop.listen((newValue) => {
+                            this._domElement.setAttribute(attrib, newValue);
+                        }));
+                    }
+                    else if (startsWith_on(attrib)) { // if an event listener attribute.
+                        const type = attrib.slice(2).toLowerCase();
+                        this._domElement.addEventListener(type, prop);
+                    }
+                    else { // if a static attribute.
+                        this._domElement.setAttribute(attrib, prop);
                     }
                 }
-
-                if (children !== null) {
-                    for (let i = 0; i < children.length; i++)
-                        children[i].mount(false, false);
-                }
-
-                _mounted = true;
-            }
-        },
-        unmount: (unmountDOMFlag) => {
-            if (_mounted) {
-                if (children !== null) {
-                    for (let i = 0; i < children.length; i++)
-                        children[i].unmount();
-                }
-
-                for (let i = 0; i < _disposeCallbacks.length; i++)
-                    _disposeCallbacks[i]();
-                _disposeCallbacks = [];
-
-                _mounted = false;
             }
 
-            if (_mountedDOM && unmountDOMFlag) {
-                _anchor.removeChild(_domElement);
-                _mountedDOM = false;
+            if (this._children !== null) {
+                for (let i = 0; i < this._children.length; i++)
+                    this._children[i].mount(false, false);
             }
-        },
-        getNodeAfter: (childVDomNode) => {
-            const index = children.indexOf(childVDomNode);
 
-            for (let i = index+1; i < children.length; i++) {
-                const e = children[i].getFirstElement();
-                if (e !== null) return e;
-            }
-            return null;
-        },
-        getFirstElement: () => {
-            return _domElement;
+            this._mounted = true;
         }
-    };
-    
-    vDomNode.type = 'element';
+    }
+    unmount(unmountDOMFlag) {
+        if (this._mounted) {
+            if (this._children !== null) {
+                for (let i = 0; i < this._children.length; i++)
+                    this._children[i].unmount();
+            }
 
-    return vDomNode;
+            for (let i = 0; i < this._disposeCallbacks.length; i++)
+                this._disposeCallbacks[i]();
+            this._disposeCallbacks = [];
+
+            this._mounted = false;
+        }
+
+        if (this._mountedDOM && unmountDOMFlag) {
+            this._anchor.removeChild(this._domElement);
+            this._mountedDOM = false;
+        }
+    }
+    getNodeAfter(childVDomNode) {
+        const index = this._children.indexOf(childVDomNode);
+
+        for (let i = index+1; i < this._children.length; i++) {
+            const e = this._children[i].getFirstElement();
+            if (e !== null) return e;
+        }
+        return null;
+    }
+    getFirstElement() {
+        return this._domElement;
+    }
 };
 
-exports.createText = function(ARG_text) {
-    let _domTextNode;
-    let _parentVDomNode;
-    let _anchor;
+exports.createElement = (a, b, c) => new ElementNode(a, b, c);
 
-    // _mounted and _mountedDOM behave same as in createElement().
-    let _mounted = false;
-    let _mountedDOM = false;
+class TextNode {
+    constructor(text) {
+        this._text = text;
 
-    let _dispose = null;
+        // _mounted and _mountedDOM behave same as in createElement().
+        this._mounted = false;
+        this._mountedDOM = false;
 
-    const vDomNode = {
-        create: (parentVDomNode, anchor) => {
-            _parentVDomNode = parentVDomNode;
-            _anchor = anchor;
+        this._dispose = null;
 
-            const value = ARG_text._type === 'atom' ? '' : ARG_text;
-            _domTextNode = document.createTextNode(value);
-        },
-        mount: (insertMountFlag, remountFlag) => {
-            if (!_mounted || remountFlag) {
-                if (ARG_text._type === 'atom') {
-                    _domTextNode.nodeValue = ARG_text.value();
-                    _dispose = ARG_text.listen((newValue) => {
-                        _domTextNode.nodeValue = newValue;
-                    });
-                }
-                _mounted = true;
+        this.type = 'text';
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        this._anchor = anchor;
+
+        const value = this._text._type === 'atom' ? '' : this._text;
+        this._domTextNode = document.createTextNode(value);
+    }
+    mount(insertMountFlag, remountFlag) {
+        if (!this._mounted || remountFlag) {
+            if (this._text._type === 'atom') {
+                this._domTextNode.nodeValue = this._text.value();
+                this._dispose = this._text.listen((newValue) => {
+                    this._domTextNode.nodeValue = newValue;
+                });
             }
+            this._mounted = true;
+        }
 
-            if (!_mountedDOM) {
-                if (insertMountFlag) {
-                    const after = _parentVDomNode.getNodeAfter(vDomNode);
-                    _anchor.insertBefore(_domTextNode, after);
-                }
-                else {
-                    _anchor.appendChild(_domTextNode);
-                }
-                _mountedDOM = true;
+        if (!this._mountedDOM) {
+            if (insertMountFlag) {
+                const after = this._parentVDomNode.getNodeAfter(this);
+                this._anchor.insertBefore(this._domTextNode, after);
             }
-        },
-        unmount: (unmountDOMFlag) => {
-            if (_mountedDOM && unmountDOMFlag) {
-                _anchor.removeChild(_domTextNode);
-                _mountedDOM = false;
+            else {
+                this._anchor.appendChild(this._domTextNode);
             }
+            this._mountedDOM = true;
+        }
+    }
+    unmount(unmountDOMFlag) {
+        if (this._mountedDOM && unmountDOMFlag) {
+            this._anchor.removeChild(this._domTextNode);
+            this._mountedDOM = false;
+        }
 
-            if (_mounted) {
-                if (_dispose !== null) {
-                    _dispose();
-                    _dispose = null;
-                }
-                _mounted = false;
+        if (this._mounted) {
+            if (this._dispose !== null) {
+                this._dispose();
+                this._dispose = null;
             }
-        },
-        getFirstElement: () => _domTextNode
-    };
-
-    vDomNode.type = 'text';
-    
-    return vDomNode;
+            this._mounted = false;
+        }
+    }
+    getFirstElement() {
+        return this._domTextNode;
+    }
 };
+exports.createText = (a) => new TextNode(a);
 
 let CURRENT_INITIALIZING_COMPONENT = null;
 
-exports.createComponent = function(initFunc, props) {
-    if (util.isUdf(props)) props = null;
-    
-    let _parentVDomNode;
+class Component {
+    constructor(initFunc, props) {
+        if (util.isUdf(props)) props = null;
+        
+        this._atoms = [];
+        this._onMountHooks = [];
+        this._onUnmountHooks = [];
 
-    const vDomNode = { _atoms: [], _onMountHooks: [], _onUnmountHooks: [] };
+        CURRENT_INITIALIZING_COMPONENT = this;
+        this._childVDomNode = initFunc(props);
+        CURRENT_INITIALIZING_COMPONENT = null;
 
-    CURRENT_INITIALIZING_COMPONENT = vDomNode;
-    const _childVDomNode = initFunc(props);
-    CURRENT_INITIALIZING_COMPONENT = null;
+        this.type = 'component';
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        this._childVDomNode.create(this, anchor);
+    }
+    mount(insertMountFlag, remountFlag) {
+        for (let i = 0; i < this._atoms.length; i++)
+            this._atoms[i].activate();
 
-    vDomNode.create = (parentVDomNode, anchor) => {
-        _parentVDomNode = parentVDomNode;
-        _childVDomNode.create(vDomNode, anchor);
-    };
+        this._childVDomNode.mount(insertMountFlag, remountFlag);
 
-    vDomNode.mount = (insertMountFlag, remountFlag) => {
-        for (let i = 0; i < vDomNode._atoms.length; i++)
-            vDomNode._atoms[i]._activate();
+        for (let i = 0; i < this._onMountHooks.length; i++)
+            this._onMountHooks[i]();
+    }
+    unmount(unmountDOMFlag) {
+        for (let i = 0; i < this._onUnmountHooks.length; i++)
+            this._onUnmountHooks[i]();
 
-        _childVDomNode.mount(insertMountFlag, remountFlag);
+        this._childVDomNode.unmount(unmountDOMFlag);
 
-        for (let i = 0; i < vDomNode._onMountHooks.length; i++)
-            vDomNode._onMountHooks[i]();
-    };
-
-    vDomNode.unmount = (unmountDOMFlag) => {
-        for (let i = 0; i < vDomNode._onUnmountHooks.length; i++)
-            vDomNode._onUnmountHooks[i]();
-
-        _childVDomNode.unmount(unmountDOMFlag);
-
-        for (let i = 0; i < vDomNode._atoms.length; i++)
-            vDomNode._atoms[i]._deactivate();
-    };
-
-    vDomNode.getNodeAfter = (childVDomNode) =>
-        _parentVDomNode.getNodeAfter(vDomNode);
-
-    vDomNode.getFirstElement = () =>
-        _childVDomNode.getFirstElement();
-
-    vDomNode.type = 'component';
-
-    return vDomNode;
+        for (let i = 0; i < this._atoms.length; i++)
+            this._atoms[i].deactivate();
+    }
+    getNodeAfter(childVDomNode) {
+        this._parentVDomNode.getNodeAfter(this);
+    }
+    getFirstElement() {
+        this._childVDomNode.getFirstElement();
+    }
 };
+exports.createComponent = (a, b) => new Component(a, b);
 
 // onMount hooks gets called after mounting.
 exports.onMount = function(hook) {
@@ -378,132 +360,122 @@ exports.onUnmount = function(hook) {
     CURRENT_INITIALIZING_COMPONENT._onUnmountHooks.push(hook);
 };
 
-exports.useAtom = function(ARG_value, deps, passDepsInArray) {
-    const atom = exports.createAtom(ARG_value, deps, passDepsInArray);
+exports.useAtom = function(a, b, c) {
+    const atom = new Atom(a, b, c);
     CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
     return atom;
 };
 
-exports.createFragment = function(children) {
-    let _parentVDomNode;
+class Fragment {
+    constructor(children) {
+        this._children = children;
+        this.type = 'fragment';
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        for (let i = 0; i < this._children.length; i++)
+            this._children[i].create(this, anchor);
+    }
+    mount(insertMountFlag, remountFlag) {
+        for (let i = 0; i < this._children.length; i++)
+            this._children[i].mount(insertMountFlag, remountFlag);
+    }
+    unmount(unmountDOMFlag) {
+        for (let i = 0; i < this._children.length; i++)
+            this._children[i].unmount(unmountDOMFlag);
+    }
+    getNodeAfter(childVDomNode) {
+        const index = this._children.indexOf(childVDomNode);
 
-    const vDomNode = {
-        create: (parentVDomNode, anchor) => {
-            _parentVDomNode = parentVDomNode;
-            for (let i = 0; i < children.length; i++)
-                children[i].create(vDomNode, anchor);
-        },
-        mount: (insertMountFlag, remountFlag) => {
-            for (let i = 0; i < children.length; i++)
-                children[i].mount(insertMountFlag, remountFlag);
-        },
-        unmount: (unmountDOMFlag) => {
-            for (let i = 0; i < children.length; i++)
-                children[i].unmount(unmountDOMFlag);
-        },
-        getNodeAfter: (childVDomNode) => {
-            const index = children.indexOf(childVDomNode);
-
-            for (let i = index+1; i < children.length; i++) {
-                const e = children[i].getFirstElement();
-                if (e !== null) return e;
-            }
-            return _parentVDomNode.getNodeAfter(vDomNode);
-        },
-        getFirstElement: () => {
-            for (let i = 0; i < children.length; i++) {
-                const e = children[i].getFirstElement();
-                if (e !== null) return e;
-            }
-            return null;
+        for (let i = index+1; i < this._children.length; i++) {
+            const e = this._children[i].getFirstElement();
+            if (e !== null) return e;
         }
-    };
-
-    vDomNode.type = 'fragment';
-
-    return vDomNode;
+        return this._parentVDomNode.getNodeAfter(this);
+    }
+    getFirstElement() {
+        for (let i = 0; i < this._children.length; i++) {
+            const e = this._children[i].getFirstElement();
+            if (e !== null) return e;
+        }
+        return null;
+    }
 };
+exports.createFragment = (a) => new Fragment(a);
 
-exports.createIf = function(ARG_conditions, children) {
-    let _anchor;
-    let _parentVDomNode;
+class IfNode {
+    constructor(conditions, children) {
+        this._children = children;
 
-    let _activeConditionIndex = -1;
-    let _isCreated = Array(ARG_conditions.length).fill(false);
+        this._activeConditionIndex = -1;
+        this._isCreated = Array(conditions.length).fill(false);
+        this._atom = exports.createAtom((arr) => arr, conditions, true);
 
-    let _atom = exports.createAtom(util.pass, ARG_conditions, true);
-    let _dispose;
-
-    const vDomNode = {};
-
-    const _activateCondition = (newIndex, insertMountFlag, remountFlag) => {
-        const prevIndex = _activeConditionIndex;
+        this.type = 'if';
+    }
+    _activateCondition(newIndex, insertMountFlag, remountFlag) {
+        const prevIndex = this._activeConditionIndex;
         const indexChanged = prevIndex !== newIndex;
 
         if (prevIndex !== -1 && indexChanged)
-            children[prevIndex].unmount(true); // physically unmount
+            this._children[prevIndex].unmount(true); // physically unmount
 
         if (newIndex !== -1 && (indexChanged || remountFlag)) {
-            if (!_isCreated[newIndex]) {
-                children[newIndex].create(vDomNode, _anchor);
-                _isCreated[newIndex] = true;
+            if (!this._isCreated[newIndex]) {
+                this._children[newIndex].create(this, this._anchor);
+                this._isCreated[newIndex] = true;
             }
-            children[newIndex].mount(insertMountFlag, remountFlag);
+            this._children[newIndex].mount(insertMountFlag, remountFlag);
         }
 
-        _activeConditionIndex = newIndex;
-    };
- 
-    vDomNode.create = (parentVDomNode, anchor) => {
-        _parentVDomNode = parentVDomNode;
-        _anchor = anchor;
-    };
-
-    vDomNode.mount = (insertMountFlag, remountFlag) => {
-        _atom._activate();
-        _dispose = _atom.listen((conditions) => {
-            _activateCondition(conditions.indexOf(true), true, false);
+        this._activeConditionIndex = newIndex;
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        this._anchor = anchor;
+    }
+    mount(insertMountFlag, remountFlag) {
+        this._atom.activate();
+        this._dispose = this._atom.listen((conditions) => {
+            this._activateCondition(conditions.indexOf(true), true, false);
         });
 
-        _activateCondition(_atom.value().indexOf(true), insertMountFlag, true);
-    };
+        this._activateCondition(this._atom.value().indexOf(true), insertMountFlag, true);
+    }
+    unmount(unmountDOMFlag) {
+        if (this._activeConditionIndex !== -1)
+            this._children[this._activeConditionIndex].unmount(unmountDOMFlag);
 
-    vDomNode.unmount = (unmountDOMFlag) => {
-        if (_activeConditionIndex !== -1)
-            children[_activeConditionIndex].unmount(unmountDOMFlag);
-
-        _dispose();
-        _dispose = null;
-        _atom._deactivate();
-    };
-
-    vDomNode.getNodeAfter = (childVDomNode) =>
-        _parentVDomNode.getNodeAfter(vDomNode);
-
-    vDomNode.getFirstElement = () =>
-        _activeConditionIndex === -1 ? null :
-            children[_activeConditionIndex].getFirstElement();
-
-    vDomNode.type = 'if';
-
-    return vDomNode;
+        this._dispose();
+        this._dispose = null;
+        this._atom.deactivate();
+    }
+    getNodeAfter(childVDomNode) {
+        return this._parentVDomNode.getNodeAfter(this);
+    }
+    getFirstElement() {
+        return this._activeConditionIndex === -1 ? null :
+            this._children[this._activeConditionIndex].getFirstElement();
+    }
 };
+exports.createIf = (a, b) => new IfNode(a, b);
 
-exports.createFor = function(component, atom) {
-    let _anchor;
-    let _parentVDomNode;
+class ForNode {
+    constructor(component, atom) {
+        this._component = component;
+        this._atom = atom;
 
-    let _atomIDs = Object.create(null);
-    let _items = [];
-    let _childVDomNodes = [];
-    let _mountingChildren = false;
+        this._atomIDs = Object.create(null);
+        this._items = [];
+        this._childVDomNodes = [];
+        this._mountingChildren = false;
 
-    let _dispose;
-
-    const reconcileElements = (newItems, insertMountFlag, remountFlag) => {
-        const oldAtomIDs = _atomIDs;
-        const oldItems = _items;
-        const oldChildVDomNodes = _childVDomNodes;
+        this.type = 'for';
+    }
+    _reconcileElements(newItems, insertMountFlag, remountFlag) {
+        const oldAtomIDs = this._atomIDs;
+        const oldItems = this._items;
+        const oldChildVDomNodes = this._childVDomNodes;
 
         // Remove duplicates in newItems.
         const newAtomIDs = Object.create(null);
@@ -538,100 +510,94 @@ exports.createFor = function(component, atom) {
             const newItem = newItems[i];
 
             if (!(newItem._id in oldAtomIDs)) {
-                const child = exports.createComponent(component, newItem);
-                child.create(vDomNode, _anchor);
+                const child = exports.createComponent(this._component, newItem);
+                child.create(this, this._anchor);
                 newChildVDomNodes[i] = child;
             }
         }
 
         const swappedIndexes = Object.create(null);
 
-        _items = [...newItems];
-        _atomIDs = newAtomIDs;
-        _childVDomNodes = [];
+        this._items = [...newItems];
+        this._atomIDs = newAtomIDs;
+        this._childVDomNodes = [];
 
-        _mountingChildren = true;
+        this._mountingChildren = true;
         // Remount vDOM nodes for all existing and newly added items.
         for (let i = 0; i < newChildVDomNodes.length; i++) {
             const remountChild = i in swappedIndexes ? true : remountFlag;
 
-            _childVDomNodes.push(newChildVDomNodes[i]);
-            _childVDomNodes[i].mount(insertMountFlag, remountFlag);
+            this._childVDomNodes.push(newChildVDomNodes[i]);
+            this._childVDomNodes[i].mount(insertMountFlag, remountFlag);
         }
-        _mountingChildren = false;
-    };
+        this._mountingChildren = false;
+    }
+    create(parentVDomNode, anchor) {
+        this._parentVDomNode = parentVDomNode;
+        this._anchor = anchor;
+    }
+    mount(insertMountFlag, remountFlag) {
+        this._atom.activate();
+        this._dispose = this._atom.listen((items) => {
+            this._reconcileElements(items, true, true/*change this to false later on*/);
+        });
 
-    const vDomNode = {
-        create: (parentVDomNode, anchor) => {
-            _parentVDomNode = parentVDomNode;
-            _anchor = anchor;
-        },
-        mount: (insertMountFlag, remountFlag) => {
-            atom._activate();
-            _dispose = atom.listen((items) => {
-                reconcileElements(items, true, true/*change this to false later on*/);
-            });
-
-            reconcileElements(atom.value(), insertMountFlag, remountFlag);
-        },
-        unmount: (unmountDOMFlag) => {
-            for (let i = 0; i < _childVDomNodes.length; i++) {
-                const child = _childVDomNodes[i];
-                child.unmount(unmountDOMFlag);
-            }
-
-            _dispose();
-            _dispose = null;
-            atom._deactivate();
-        },
-        getNodeAfter: (childVDomNode) => {
-            const index = _childVDomNodes.indexOf(childVDomNode);
-
-            for (let i = index+1; i < _childVDomNodes.length; i++) {
-                const e = _childVDomNodes[i].getFirstElement();
-                if (e !== null) return e;
-            }
-            return _parentVDomNode.getNodeAfter(vDomNode);
-        },
-        getFirstElement: () => {
-            for (let i = 0; i < _childVDomNodes.length; i++) {
-                const e = _childVDomNodes[i].getFirstElement();
-                if (e !== null) return e;
-            }
-            return null;
+        this._reconcileElements(this._atom.value(), insertMountFlag, remountFlag);
+    }
+    unmount(unmountDOMFlag) {
+        for (let i = 0; i < this._childVDomNodes.length; i++) {
+            const child = this._childVDomNodes[i];
+            child.unmount(unmountDOMFlag);
         }
-    };
 
-    vDomNode.type = 'for';
+        this._dispose();
+        this._dispose = null;
+        this._atom.deactivate();
+    }
+    getNodeAfter(childVDomNode) {
+        const index = this._childVDomNodes.indexOf(childVDomNode);
 
-    return vDomNode;
+        for (let i = index+1; i < this._childVDomNodes.length; i++) {
+            const e = this._childVDomNodes[i].getFirstElement();
+            if (e !== null) return e;
+        }
+        return this._parentVDomNode.getNodeAfter(this);
+    }
+    getFirstElement() {
+        for (let i = 0; i < this._childVDomNodes.length; i++) {
+            const e = this._childVDomNodes[i].getFirstElement();
+            if (e !== null) return e;
+        }
+        return null;
+    }
 };
+exports.createFor = (a, b) => new ForNode(a, b);
 
-exports.createRoot = function(anchor) {
-    let _rootVDomNode = null;
+class RootNode {
+    constructor(anchor) {
+        this._anchor = anchor;
+        this._node = null;
+    }
+    render(target) {
+        if (util.isUdf(target)) target = null;
 
-    const rootObject = {
-        render: (target) => {
-            if (util.isUdf(target)) target = null;
+        if (this._node !== null)
+            this._node.unmount(true); // physically unmount
+        this._node = target;
 
-            if (_rootVDomNode !== null)
-                _rootVDomNode.unmount(true); // physically unmount
-            _rootVDomNode = target;
-
-            if (_rootVDomNode !== null) {
-                if (_rootVDomNode.isCreated !== true) {
-                    _rootVDomNode.create(rootObject, anchor);
-                    _rootVDomNode.isCreated = true;
-                }
-                _rootVDomNode.mount(false, false);
+        if (this._node !== null) {
+            if (this._node.isCreated !== true) {
+                this._node.create(this, this._anchor);
+                this._node.isCreated = true;
             }
-        },
-        getNodeAfter: (childVDomNode) => null
-    };
-
-    return rootObject;
+            this._node.mount(false, false);
+        }
+    }
+    getNodeAfter(childVDomNode) {
+        return null;
+    }
 };
+exports.createRoot = (a) => new RootNode(a);
 
 return exports;
 }());
-
