@@ -2,11 +2,6 @@
 const fm = (function(){
 const util = {
     isUdf: (a) => typeof a === 'undefined',
-    findIndexReverse: (a, item) => {
-        for (let i = item.length-1; i >= 0; i--)
-            if (item[i] === a) return i;
-        return -1;
-    },
     removeIndex: (a, i) => {
         if (i === -1) return;
 
