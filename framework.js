@@ -11,6 +11,20 @@ const util = {
             a[i] = a[++i];
         }
         a.pop();
+    },
+    bisectLeft: (arr, e) => {
+        let low = 0;
+        let high = arr.length;
+        let mid;
+
+        while (low < high) {
+            mid = Math.floor((low + high) / 2);
+            if (arr[mid] < e)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        return low;
     }
 };
 
@@ -472,20 +486,6 @@ class ForNode {
 
         this.type = 'for';
     }
-    _findSortIndex(arr, e) {
-        let low = 0;
-        let high = arr.length;
-        let mid;
-
-        while (low < high) {
-            mid = Math.floor((low + high) / 2);
-            if (arr[mid] < e)
-                low = mid + 1;
-            else
-                high = mid;
-        }
-        return low;
-    }
     _calcSwappedIndexes(unchangedIndexes) {
         const seq = []; // longest increasing sequence.
         const seqIndex = []; // indexes of longest increasing sequence.
@@ -501,7 +501,7 @@ class ForNode {
                 seqIndex.push(i);
             }
             else {
-                const j = this._findSortIndex(seq, order);
+                const j = util.bisectLeft(seq, order);
                 path[i] = j === 0 ? -1 : seqIndex[j-1];
                 seq[j] = order;
                 seqIndex[j] = i;
