@@ -2,9 +2,13 @@
 const fm = (function(){
 const util = {
     isUdf: (a) => typeof a === 'undefined',
-    removeItem: (a, item) => {
-        let i = a.indexOf(item);
-        if (i < 0 || i >= a.length) return;
+    findIndexReverse: (a, item) => {
+        for (let i = item.length-1; i >= 0; i--)
+            if (item[i] === a) return i;
+        return -1;
+    },
+    removeIndex: (a, i) => {
+        if (i === -1) return;
 
         const stop = a.length - 1;
         while (i < stop) {
@@ -28,8 +32,35 @@ const util = {
     }
 };
 
+let ATOM_ID_COUNTER = 0;
+
 let ATOM_UPDATE_SCHEDULED = false;
+let ATOM_CLEAN_SCHEDULED = false;
+
+let ATOM_DELETE_COUNTER = 0;
+let ATOM_IDS_TO_DELETE = Object.create(null);
+
 const ATOM_STACK = [];
+
+const CLEAN_ATOMS = () => {
+    if (ATOM_DELETE_COUNTER > 0) {
+        let deleteCount = 0;
+
+        for (let i = 0; i < ATOM_STACK.length; i++) {
+            const atom = ATOM_STACK[i];
+
+            if (atom._id in ATOM_IDS_TO_DELETE)
+                deleteCount++;
+            else if (deleteCount > 0)
+                ATOM_STACK[i-deleteCount] = atom;
+        }
+
+        ATOM_STACK.splice(ATOM_STACK.length - deleteCount, deleteCount);
+
+        ATOM_DELETE_COUNTER = 0;
+        ATOM_IDS_TO_DELETE = Object.create(null);
+    }
+};
 
 const UPDATE_ATOMS = () => {
     // 1. Call _update() on all dirty atoms.
@@ -57,11 +88,24 @@ const UPDATE_ATOMS = () => {
     }
 };
 
+const SCHEDULE_ATOM_CLEAN = () => {
+    if (!ATOM_CLEAN_SCHEDULED) {
+        ATOM_CLEAN_SCHEDULED = true;
+
+        setTimeout(() => {
+            CLEAN_ATOMS();
+            ATOM_CLEAN_SCHEDULED = false;
+        });
+    }
+};
+
 const SCHEDULE_ATOM_UPDATE = () => {
     if (!ATOM_UPDATE_SCHEDULED) {
         ATOM_UPDATE_SCHEDULED = true;
 
         setTimeout(() => {
+            CLEAN_ATOMS();
+
             ATOM_UPDATE_SCHEDULED = false;
             UPDATE_ATOMS(); // side effects in callbacks will schedule another update.
         });
@@ -69,8 +113,6 @@ const SCHEDULE_ATOM_UPDATE = () => {
 };
 
 const exports = {};
-
-let ATOM_ID_COUNTER = 0;
 
 /*
 value: initial value of atom or a function if deps is an Array.
@@ -131,20 +173,26 @@ class Atom {
     listen(newCallback) {
         this._callbacks.push(newCallback);
         return () => {
-            util.removeItem(this._callbacks, newCallback);
+            let i = this._callbacks.indexOf(newCallback);
+            util.removeIndex(this._callbacks, i);
         };
     }
     activate() {
         if (!this._active) {
             ATOM_STACK.push(this);
+
             if (!this._isSource)
                 this._updateDerivedValue();
+
             this._active = true;
         }
     }
     deactivate() {
         if (this._active) {
-            util.removeItem(ATOM_STACK, this);
+            ATOM_DELETE_COUNTER++;
+            ATOM_IDS_TO_DELETE[this._id] = true;
+            SCHEDULE_ATOM_CLEAN();
+
             this._active = false;
         }
     }
