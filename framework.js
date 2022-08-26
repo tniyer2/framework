@@ -632,7 +632,7 @@ class ForNode {
             this._swappedIndexes = this._calcSwappedIndexes(unchangedIndexes);
 
             this._childVDomNodes = newChildVDomNodes;
-            for (let i = 0; i < this._childVDomNodes.length; i++) {
+            for (let i = this._childVDomNodes.length-1; i >= 0; i--) {
                 this._childVDomNodes[i].mount(true, this._swappedIndexes[i] === true || i in addedIndexes);
             }
 
@@ -665,9 +665,6 @@ class ForNode {
         const index = this._childVDomNodes.indexOf(childVDomNode);
 
         for (let i = index+1; i < this._childVDomNodes.length; i++) {
-            if (this._mountingChildren && this._swappedIndexes[i] !== false)
-                continue;
-
             const e = this._childVDomNodes[i].getFirstElement();
             if (e !== null) return e;
         }
