@@ -166,11 +166,15 @@ Atom.prototype.value = function() {
 };
 Atom.prototype.listen = function(newCallback) {
     this._callbacks.push(newCallback);
-    return () => {
-        let i = this._callbacks.indexOf(newCallback);
-        util.removeIndex(this._callbacks, i);
-    };
+    return this._callbacks.length-1;
 };
+Atom.prototype.unsubscribe = function(index) {
+    const l = this._callbacks.length;
+    if (l === 1 || index >= l-1)
+        this._callbacks.pop();
+    else
+        this._callbacks[index] = this._callbacks.pop();
+}
 Atom.prototype.activate = function() {
     if (!this._active) {
         ATOM_STACK.push(this);
@@ -205,7 +209,7 @@ function ElementNode (tagName, props, children) {
     this._mounted = false;
     this._mountedDOM = false;
 
-    this._disposeCallbacks = [];
+    this._disposeIndexes = [];
     
     this.type = 'element';
 };
@@ -240,7 +244,7 @@ ElementNode.prototype.mount = function(insertMountFlag, remountFlag) {
 
                 if (prop._type === 'atom') { // if a dynamic attribute.
                     this._domElement.setAttribute(attrib, prop.value());
-                    this._disposeCallbacks.push(prop.listen((newValue) => {
+                    this._disposeIndexes.push(prop.listen((newValue) => {
                         this._domElement.setAttribute(attrib, newValue);
                     }));
                 }
@@ -269,9 +273,16 @@ ElementNode.prototype.unmount = function(unmountDOMFlag) {
                 this._children[i].unmount();
         }
 
-        for (let i = 0; i < this._disposeCallbacks.length; i++)
-            this._disposeCallbacks[i]();
-        this._disposeCallbacks = [];
+        if (this._props !== null) {
+            for (let i = 0; i < this._propKeys.length; i++) {
+                const prop = this._props[this._propKeys[i]];
+
+                let j = 0;
+                if (prop._type === 'atom')
+                    prop.unsubscribe(this._disposeIndexes[j++]);
+            }
+            this._disposeIndexes = [];
+        }
 
         this._mounted = false;
     }
@@ -303,7 +314,7 @@ function TextNode(text) {
     this._mounted = false;
     this._mountedDOM = false;
 
-    this._dispose = null;
+    this._disposeIndex = null;
 
     this.type = 'text';
 };
@@ -318,7 +329,7 @@ TextNode.prototype.mount = function(insertMountFlag, remountFlag) {
     if (!this._mounted) {
         if (this._text._type === 'atom') {
             this._domTextNode.nodeValue = this._text.value();
-            this._dispose = this._text.listen((newValue) => {
+            this._disposeIndex = this._text.listen((newValue) => {
                 this._domTextNode.nodeValue = newValue;
             });
         }
@@ -343,9 +354,9 @@ TextNode.prototype.unmount = function(unmountDOMFlag) {
     }
 
     if (this._mounted) {
-        if (this._dispose !== null) {
-            this._dispose();
-            this._dispose = null;
+        if (this._disposeIndex !== null) {
+            this._text.unsubscribe(this._disposeIndex);
+            this._disposeIndex = null;
         }
         this._mounted = false;
     }
@@ -487,7 +498,7 @@ IfNode.prototype.create = function(parentVDomNode, anchor) {
 };
 IfNode.prototype.mount = function(insertMountFlag, _/*remountFlag*/) {
     this._atom.activate();
-    this._dispose = this._atom.listen((conditions) => {
+    this._disposeIndex = this._atom.listen((conditions) => {
         this._activateCondition(conditions.indexOf(true), true, false);
     });
 
@@ -497,8 +508,8 @@ IfNode.prototype.unmount = function(unmountDOMFlag) {
     if (this._activeConditionIndex !== -1)
         this._children[this._activeConditionIndex].unmount(unmountDOMFlag);
 
-    this._dispose();
-    this._dispose = null;
+    this._atom.unsubscribe(this._disposeIndex);
+    this._disposeIndex = null;
     this._atom.deactivate();
 };
 IfNode.prototype.getNodeAfter = function(_/*childVDomNode*/) {
@@ -638,7 +649,7 @@ ForNode.prototype.create = function(parentVDomNode, anchor) {
 };
 ForNode.prototype.mount = function(insertMountFlag, remountFlag) {
     this._atom.activate();
-    this._dispose = this._atom.listen((items) => {
+    this._disposeIndex = this._atom.listen((items) => {
         this._reconcileElements(items, true, false);
     });
 
@@ -650,8 +661,8 @@ ForNode.prototype.unmount = function(unmountDOMFlag) {
         child.unmount(unmountDOMFlag);
     }
 
-    this._dispose();
-    this._dispose = null;
+    this._atom.unsubscribe(this._disposeIndex);
+    this._disposeIndex = null;
     this._atom.deactivate();
 };
 ForNode.prototype.getNodeAfter = function(childVDomNode) {
