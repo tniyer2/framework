@@ -367,18 +367,18 @@ TextNode.prototype.getFirstElement = function() {
 exports.createText = (a) => new TextNode(a);
 
 
-let CURRENT_INITIALIZING_COMPONENT = null;
+let COMPONENT = null; // current initializaing component
 
 function Component(initFunc, props) {
     if (util.isUdf(props)) props = null;
     
-    this._atoms = [];
-    this._onMountHooks = [];
-    this._onUnmountHooks = [];
+    this._atoms = null;
+    this._onMountHooks = null;
+    this._onUnmountHooks = null;
 
-    CURRENT_INITIALIZING_COMPONENT = this;
+    COMPONENT = this;
     this._childVDomNode = initFunc(props);
-    CURRENT_INITIALIZING_COMPONENT = null;
+    COMPONENT = null;
 
     this.type = 'component';
 };
@@ -387,22 +387,30 @@ Component.prototype.create = function(parentVDomNode, anchor) {
     this._childVDomNode.create(this, anchor);
 };
 Component.prototype.mount = function(insertMountFlag, remountFlag) {
-    for (let i = 0; i < this._atoms.length; i++)
-        this._atoms[i].activate();
+    if (this._atoms !== null) {
+        for (let i = 0; i < this._atoms.length; i++)
+            this._atoms[i].activate();
+    }
 
     this._childVDomNode.mount(insertMountFlag, remountFlag);
 
-    for (let i = 0; i < this._onMountHooks.length; i++)
-        this._onMountHooks[i]();
+    if (this._onMountHooks !== null) {
+        for (let i = 0; i < this._onMountHooks.length; i++)
+            this._onMountHooks[i]();
+    }
 };
 Component.prototype.unmount = function(unmountDOMFlag) {
-    for (let i = 0; i < this._onUnmountHooks.length; i++)
-        this._onUnmountHooks[i]();
+    if (this._onUnmountHooks !== null) {
+        for (let i = 0; i < this._onUnmountHooks.length; i++)
+            this._onUnmountHooks[i]();
+    }
 
     this._childVDomNode.unmount(unmountDOMFlag);
 
-    for (let i = 0; i < this._atoms.length; i++)
-        this._atoms[i].deactivate();
+    if (this._atoms !== null) {
+        for (let i = 0; i < this._atoms.length; i++)
+            this._atoms[i].deactivate();
+    }
 };
 Component.prototype.getNodeAfter = function(_/*childVDomNode*/) {
     return this._parentVDomNode.getNodeAfter(this);
@@ -415,17 +423,26 @@ exports.createComponent = (a, b) => new Component(a, b);
 
 // onMount hooks gets called after mounting.
 exports.onMount = function(hook) {
-    CURRENT_INITIALIZING_COMPONENT._onMountHooks.push(hook);
+    if (COMPONENT._onMountHooks === null)
+        COMPONENT._onMountHooks = [hook];
+    else
+        COMPONENT._onMountHooks.push(hook);
 };
 
 // onUnmount hooks gets called before unmounting.
 exports.onUnmount = function(hook) {
-    CURRENT_INITIALIZING_COMPONENT._onUnmountHooks.push(hook);
+    if (COMPONENT._onUnmountHooks === null)
+        COMPONENT._onUnmountHooks = [hook];
+    else
+        COMPONENT._onUnmountHooks.push(hook);
 };
 
 exports.useAtom = function(a, b, c) {
     const atom = new Atom(a, b, c);
-    CURRENT_INITIALIZING_COMPONENT._atoms.push(atom);
+    if (COMPONENT._atoms === null)
+        COMPONENT._atoms = [atom];
+    else
+        COMPONENT._atoms.push(atom);
     return atom;
 };
 
