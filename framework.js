@@ -209,7 +209,7 @@ function ElementNode (tagName, props, children) {
     this._mounted = false;
     this._mountedDOM = false;
 
-    this._disposeIndexes = [];
+    this._disposeIndexes = null;
     
     this.type = 'element';
 };
@@ -244,6 +244,10 @@ ElementNode.prototype.mount = function(insertMountFlag, remountFlag) {
 
                 if (prop._type === 'atom') { // if a dynamic attribute.
                     this._domElement.setAttribute(attrib, prop.value());
+
+                    if (this._disposeIndexes === null)
+                        this._disposeIndexes = [];
+
                     this._disposeIndexes.push(prop.listen((newValue) => {
                         this._domElement.setAttribute(attrib, newValue);
                     }));
@@ -281,7 +285,7 @@ ElementNode.prototype.unmount = function(unmountDOMFlag) {
                 if (prop._type === 'atom')
                     prop.unsubscribe(this._disposeIndexes[j++]);
             }
-            this._disposeIndexes = [];
+            this._disposeIndexes = null;
         }
 
         this._mounted = false;
